@@ -21,6 +21,8 @@ BadBuilder is a tool for creating a BadUpdate USB drive for the Xbox 360. It aut
 - Prepares the USB drive for the BadUpdate exploit by copying all required files.
 ### Homebrew Support
 - Allows adding homebrew applications by specifying their root folder.
+- Allows adding custom homebrew from either a folder or a ZIP archive in the Homebrew menu.
+- Lets you choose a custom `.xex` entry point and make that application the default launch option.
 - Prompts for the path of the entry point if it could not be automatically determined.
 - Automatically searches for the entry point (`.xex`) file within the folder.
 - If multiple `.xex` files are found, BadBuilder will prompt you to select the correct one.
@@ -67,6 +69,12 @@ BadBuilder will detect `Aurora.xex` as the entry point and patch it accordingly.
 
 > [!IMPORTANT]  
 > Homebrew apps which do not contain the entry point in the root folder will require you to manually enter the path of the entry point.
+
+### Offline and Local Archives
+- BadBuilder uses the download cache when a release cannot be reached.
+- If release metadata or a download cannot be resolved, it prompts for a local archive and uses it from its existing location.
+- When release metadata includes a SHA-256 hash, BadBuilder compares it with cached, downloaded, and user-supplied archives and redownloads or rejects changed files automatically.
+- Archives without a published hash can still be reused, but BadBuilder warns that their contents are unverified and may cause the install to fail.
 
 ## Reporting Issues
 If you encounter any problems, please create a new issue with details about your setup and the problem.
