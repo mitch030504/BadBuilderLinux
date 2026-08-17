@@ -9,6 +9,8 @@ internal static partial class BuilderApp
     {
         Controls.RenderHeader();
 
+        var x = DriveInfo.GetDrives();
+
         DriveInfo[] drives = [..DriveInfo.GetDrives()
             .Where(drive => drive.IsReady)
             .OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase)];
@@ -26,7 +28,7 @@ internal static partial class BuilderApp
             return $"{drive.RootDirectory.FullName} ({sizeGigabytes:0.00} GB) - {drive.DriveType}";
         }
 
-        Config.TargetDrive = Controls.PromptSelection(
+        Config.MountPoint = Controls.PromptSelection(
             "Choose target drive",
             [..drives.Select(drive => new MenuOption<string>(drive.RootDirectory.FullName, FormatDriveLabel(drive)))],
             "[bold white]All data will be lost on this drive.[/] Make sure to select the correct drive."

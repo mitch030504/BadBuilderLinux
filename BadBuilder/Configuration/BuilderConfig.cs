@@ -7,7 +7,7 @@ internal sealed class BuilderConfig
         Homebrew.AddRange(builtInHomebrew);
     }
 
-    public string? TargetDrive { get; set; }
+    public string? MountPoint { get; set; }
 
     public ExploitOption SelectedExploit     { get; set; } = ExploitOption.BadUpdate;
     public BootstrapOption SelectedBootstrap { get; set; } = BootstrapOption.XeUnshackle;
@@ -19,7 +19,7 @@ internal sealed class BuilderConfig
     {
         return 
         $"""
-            Target drive: {TargetDrive}
+            Target drive: {MountPoint}
 
             Selected exploit: {SelectedExploit}
             Selected bootstrap: {SelectedBootstrap}
@@ -28,19 +28,4 @@ internal sealed class BuilderConfig
             Default launch homebrew: {LaunchHomebrewId ?? "N/A"}
         """;
     }
-}
-
-internal sealed record HomebrewEntry(string ID, string DisplayName, string Description, ArtifactDefinition? Artifact = null, string? SourcePath = null, string? EntryPointRelativePath = null);
-
-
-internal enum ExploitOption
-{
-    ABadAvatar,
-    BadUpdate,
-}
-
-internal enum BootstrapOption
-{
-    XeUnshackle,
-    FreeMyXe,
 }

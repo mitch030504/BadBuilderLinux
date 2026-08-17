@@ -59,7 +59,7 @@ internal static partial class BuilderApp
 
         try
         {
-            if (string.IsNullOrWhiteSpace(Config.TargetDrive))
+            if (string.IsNullOrWhiteSpace(Config.MountPoint))
                 throw new InvalidOperationException("Select a target drive.");
 
             if (Config.LaunchHomebrewId is not null)
@@ -72,7 +72,8 @@ internal static partial class BuilderApp
                     throw new InvalidOperationException("The selected default homebrew has no valid entry point.");
             }
 
-            Controls.Confirm($"Are you sure you would like to format [bold]{Config.TargetDrive}[/]? All data on this drive will be lost.", false, warning: true);
+            bool format = Controls.Confirm($"Are you sure you would like to format [bold]{Config.MountPoint}[/]? All data on this drive will be lost.", false, warning: true);
+
 
             var artifacts       = Catalog.GetSelectedArtifacts(Config);
             string workRoot     = Path.Combine(AppContext.BaseDirectory, "Work");
@@ -105,7 +106,7 @@ internal static partial class BuilderApp
                 new(InstallOperationKind.WriteFile, "info.txt", Contents: "This drive was created with BadBuilder by Pdawg.\nFind more info here: https://github.com/Pdawg-bytes/BadBuilder" + $"\n\n{configText}")
             };
 
-            await InstallService.ExecuteAsync(staged, extraOperations, Config.TargetDrive!, cancellationToken);
+            await InstallService.ExecuteAsync(staged, extraOperations, Config.MountPoint!, cancellationToken);
 
             Controls.WriteSuccess("Your USB drive is ready for use.");
 

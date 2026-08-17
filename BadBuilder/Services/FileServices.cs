@@ -12,4 +12,9 @@ internal static class FileServices
     }
 
     public static string NormalizeUserPath(string path) => path.Trim().Trim('"', '\'');
+
+    public static void FormatDisk()
+    {
+
+    }
 }

@@ -192,7 +192,7 @@ internal static class Controls
         table.AddColumn(new TableColumn(new Markup($"[bold {green}]Section[/]")).LeftAligned());
         table.AddColumn(new TableColumn(new Markup($"[bold {green}]Selection[/]")).LeftAligned());
 
-        table.AddRow("Drive", $"[gray]{Escape(config.TargetDrive ?? "None selected")}[/]");
+        table.AddRow("Drive", $"[gray]{Escape(config.MountPoint ?? "None selected")}[/]");
         table.AddRow("Exploit", $"[gray]{Escape(config.SelectedExploit.ToString())}[/]");
         table.AddRow("Bootstrap", $"[gray]{Escape(config.SelectedBootstrap.ToString())}[/]");
 
