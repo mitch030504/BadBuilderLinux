@@ -4,21 +4,18 @@ namespace BadBuilder.Configuration;
 
 internal sealed class BuilderConfig
 {
-    public BuilderConfig(IEnumerable<HomebrewEntry> builtInHomebrew)
-    {
-        Homebrew.AddRange(builtInHomebrew);
-    }
+    internal BuilderConfig(IEnumerable<HomebrewEntry> builtInHomebrew) =>Homebrew.AddRange(builtInHomebrew);
 
-    public string? MountPoint { get; set; }
-    public DiskInfo? TargetDisk { get; set; }
+    internal string? MountPoint   { get; set; }
+    internal DiskInfo? TargetDisk { get; set; }
 
-    public ExploitOption SelectedExploit     { get; set; } = ExploitOption.BadUpdate;
-    public BootstrapOption SelectedBootstrap { get; set; } = BootstrapOption.XeUnshackle;
+    internal ExploitOption SelectedExploit     { get; set; } = ExploitOption.BadUpdate;
+    internal BootstrapOption SelectedBootstrap { get; set; } = BootstrapOption.XeUnshackle;
 
-    public List<HomebrewEntry> Homebrew {  get; } = [];
-    public HomebrewEntry? LaunchHomebrew { get; set; }
+    internal List<HomebrewEntry> Homebrew  { get; } = [];
+    internal HomebrewEntry? LaunchHomebrew { get; set; }
 
-    public bool FirmwareUpdateEnabled { get; set; } = false;
+    internal bool FirmwareUpdateEnabled { get; set; } = false;
 
     public override string ToString()
     {

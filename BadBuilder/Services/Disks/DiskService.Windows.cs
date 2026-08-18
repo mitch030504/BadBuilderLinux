@@ -44,11 +44,9 @@ internal static partial class DiskService
     [SupportedOSPlatform("windows")]
     private static RawDiskStream OpenRawDiskForWrite(DiskInfo disk)
     {
-        int diskIndex = int.Parse(disk.ID);
-
+        int diskIndex                = int.Parse(disk.ID);
         List<VolumeLock> volumeLocks = LockAndDismountVolumes(diskIndex);
-
-        string path = $@"\\.\PhysicalDrive{diskIndex}";
+        string path                  = $@"\\.\PhysicalDrive{diskIndex}";
 
         SafeFileHandle handle = CreateFile(
             path,
@@ -181,9 +179,13 @@ internal static partial class DiskService
             string path = $@"\\.\{driveLetter.TrimEnd('\\')}";
 
             SafeFileHandle handle = CreateFile(
-                path, GENERIC_READ | GENERIC_WRITE,
+                path, 
+                GENERIC_READ | GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
-                IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero
+                IntPtr.Zero, 
+                OPEN_EXISTING, 
+                0, 
+                IntPtr.Zero
             );
 
             if (handle.IsInvalid) return null;

@@ -14,8 +14,8 @@ internal enum BootstrapOption
 
 
 internal abstract record Source();
-internal sealed record GitHubReleaseSource(string Owner, string Repo, string? ReleaseTag = null, string? AssetName = null) : Source;
-internal sealed record DirectSource(string URL) : Source;
+internal sealed record   GitHubReleaseSource(string Owner, string Repo, string? ReleaseTag = null, string? AssetName = null) : Source;
+internal sealed record   DirectSource(string URL) : Source;
 
 internal sealed record HomebrewEntry(
     ArtifactDefinition Artifact,

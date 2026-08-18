@@ -38,7 +38,7 @@ internal static partial class BuilderApp
 
         Config.SelectedExploit = Controls.PromptSelection(
             "Choose exploit",
-            [..Catalog.Exploits.Select(pair => new MenuOption<ExploitOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
+            [..ArtifactCatalog.Exploits.Select(pair => new MenuOption<ExploitOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
             "Executes the console exploit and unlocks the hypervisor, allowing further unsigned code execution."
         );
     }
@@ -47,14 +47,15 @@ internal static partial class BuilderApp
     {
         Controls.RenderHeader();
 
-        var selectedBootstrap = Controls.PromptSelection(
+        BootstrapOption selected = Controls.PromptSelection(
             "Choose post-exploit bootstrap",
-            [..Catalog.Bootstraps.Select(pair => new MenuOption<BootstrapOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
+            [..ArtifactCatalog.Bootstraps.Select(pair => new MenuOption<BootstrapOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
             "The payload executed immediately after a successful hypervisor exploit to patch the kernel and initialize homebrew capabilities."
         );
 
-        Config.SelectedBootstrap = selectedBootstrap;
-        if (selectedBootstrap != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
+        Config.SelectedBootstrap = selected;
+
+        if (selected != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
         {
             Config.LaunchHomebrew = null;
             Controls.WriteWarning("The default homebrew launch selection was cleared because automatic launching requires XeUnshackle.");

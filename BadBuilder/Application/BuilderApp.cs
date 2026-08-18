@@ -8,10 +8,9 @@ namespace BadBuilder.Application;
 
 internal static partial class BuilderApp
 {
-    private static readonly ArtifactCatalog Catalog = ArtifactCatalog.CreateDefault();
-    private static readonly BuilderConfig Config    = new(Catalog.Homebrew);
+    private static readonly BuilderConfig Config = new(ArtifactCatalog.Homebrew);
 
-    public static async Task RunAsync(CancellationToken cancellationToken)
+    internal static async Task RunAsync(CancellationToken cancellationToken)
     {
         bool running = true;
         while (running && !cancellationToken.IsCancellationRequested)
@@ -99,7 +98,9 @@ internal static partial class BuilderApp
                     return;
             }
 
-            var artifacts       = Catalog.GetSelectedArtifacts(Config);
+            if (Config.MountPoint is null) throw new Exception("Format did not remount the drive, installation cannot continue.");
+
+            var artifacts       = ArtifactCatalog.GetSelectedArtifacts(Config);
             string workRoot     = Path.Combine(AppContext.BaseDirectory, "Work");
             string downloadRoot = Path.Combine(workRoot, "Downloads");
             string stagingRoot  = Path.Combine(workRoot, "Staging");
@@ -108,10 +109,8 @@ internal static partial class BuilderApp
             Controls.PadLine();
             DownloadResult download = await DownloadService.DownloadAsync(artifacts, downloadRoot, cancellationToken);
 
-            if (download.DownloadedCount > 0)
-                Controls.WriteSuccess($"[bold]{download.DownloadedCount}[/] download(s) completed.");
-            else
-                Controls.WriteSuccess("All downloads are already up to date.");
+            if (download.DownloadedCount > 0) Controls.WriteSuccess($"[bold]{download.DownloadedCount}[/] download(s) completed.");
+            else                              Controls.WriteSuccess("All downloads are already up to date.");
 
             Controls.PadLine();
             Controls.WriteInfo("Extracting files.");
@@ -126,13 +125,13 @@ internal static partial class BuilderApp
 
             string configText = $"Configuration:\n{Config}";
 
-            var extraOperations = new List<InstallOperation>
-            {
+            List<InstallOperation> extraOperations =
+            [
                 new(InstallOperationKind.WriteFile, "name.txt", Contents: "USB Storage Device"),
                 new(InstallOperationKind.WriteFile, "info.txt", Contents: "This drive was created with BadBuilder by Pdawg.\nFind more info here: https://github.com/Pdawg-bytes/BadBuilder" + $"\n\n{configText}")
-            };
+            ];
 
-            await InstallService.ExecuteAsync(staged, extraOperations, Config.MountPoint!, cancellationToken);
+            await InstallService.ExecuteAsync(staged, extraOperations, Config.MountPoint, cancellationToken);
 
             if (Config.LaunchHomebrew is not null)
             {

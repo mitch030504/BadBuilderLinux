@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using DiscUtils.Raw;
-using DiscUtils.Partitions;
-using DiscUtils.Streams;
+﻿using DiscUtils.Raw;
 using DiscUtils.Fat;
-using System.Text;
+using DiscUtils.Streams;
+using System.Diagnostics;
+using DiscUtils.Partitions;
 
 namespace BadBuilder.Services.Disks;
 

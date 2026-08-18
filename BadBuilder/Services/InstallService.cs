@@ -4,7 +4,7 @@ namespace BadBuilder.Services;
 
 internal static class InstallService
 {
-    public static async Task ExecuteAsync(
+    internal static async Task ExecuteAsync(
         IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> artifacts,
         IReadOnlyList<InstallOperation> extraOperations,
         string targetRoot,
@@ -34,7 +34,7 @@ internal static class InstallService
             case InstallOperationKind.CopyFile:
                 {
                     string source = ResolveSource(stagingPath, operation);
-                    EnsureFile(source);
+                    FileServices.EnsureFile(source);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                     File.Copy(source, destination, overwrite: true);
                     break;
@@ -48,7 +48,7 @@ internal static class InstallService
                     string source = ResolveInside(targetRoot, operation.SourcePath
                         ?? throw new InvalidOperationException($"{operation.Kind} requires a source path."));
 
-                    EnsureFile(source);
+                    FileServices.EnsureFile(source);
                     File.Move(source, destination, overwrite: true);
                     break;
                 }
@@ -82,11 +82,9 @@ internal static class InstallService
     private static string ResolveInside(string root, string relativePath)
     {
         string fullRoot = Path.GetFullPath(root);
-        string current = fullRoot;
+        string current  = fullRoot;
 
-        foreach (string component in relativePath.Split(
-            ['/', '\\'],
-            StringSplitOptions.RemoveEmptyEntries))
+        foreach (string component in relativePath.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
         {
             if (component == ".")
                 continue;
@@ -121,11 +119,5 @@ internal static class InstallService
         }
 
         return fullPath;
-    }
-
-    private static void EnsureFile(string path)
-    {
-        if (!File.Exists(path))
-            throw new FileNotFoundException($"Staged file not found: {path}", path);
     }
 }
