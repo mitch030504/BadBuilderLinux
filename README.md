@@ -31,12 +31,12 @@ BadBuilder is a tool for creating BadUpdate/ABadAvatar USB drives for the Xbox 3
 ## How to Use
 1. **Launch the executable as Administrator/sudo**. It will open inside of a Terminal window. If the process is not elevated, BadBuilder will refuse to launch.
 2. **Navigate the menus**. BadBuilder now uses a configuration system rather than being a fixed series of prompts. You may navigate the menus in any order.
-2.a. **Target drive:** This menu is where you select the target drive that BadBuilder will format and write files to.
-2.b. **Exploit:** Choose between BadUpdate and ABadAvatar depending on your preferences.
-2.c. **Post-exploit bootstrap:** Choose between XeUnshackle and FreeMyXe depending on your preferences.
-2.d. **Homebrew:** Add new homebrew packages, remove existing ones, and manage the default homebrew to launch via Dashlaunch when `XeUnshackle` is selected as the bootstrap.
-2.e. **Update Xbox Dashboard:** This menu allows you to change the deployment to the apply the `2.0.17559.0` dashboard update required by BadUpdate. **This is only mandatory if your Xbox 360 is not already on this dashboard version.**
-2.f. **Install:** Begin the deployment process onto your target drive. This is will you will be prompted to format the disk. **Make sure the correct drive is selected.**
+- 2.a. **Target drive:** This menu is where you select the target drive that BadBuilder will format and write files to.
+- 2.b. **Exploit:** Choose between BadUpdate and ABadAvatar depending on your preferences.
+- 2.c. **Post-exploit bootstrap:** Choose between XeUnshackle and FreeMyXe depending on your preferences.
+- 2.d. **Homebrew:** Add new homebrew packages, remove existing ones, and manage the default homebrew to launch via Dashlaunch when `XeUnshackle` is selected as the bootstrap.
+- 2.e. **Update Xbox Dashboard:** This menu allows you to change the deployment to the apply the `2.0.17559.0` dashboard update required by BadUpdate. **This is only mandatory if your Xbox 360 is not already on this dashboard version.**
+- 2.f. **Install:** Begin the deployment process onto your target drive. This is will you will be prompted to format the disk. **Make sure the correct drive is selected.**
 > [!CAUTION]
 > Formatting a disk means that all data will be lost. Make sure you have selected the right drive before confirming the format. I am not responsible for any data loss.
 
