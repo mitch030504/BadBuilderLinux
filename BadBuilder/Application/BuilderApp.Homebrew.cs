@@ -25,7 +25,7 @@ internal static partial class BuilderApp
                 case "add": AddCustomHomebrew(); break;
                 case "remove": RemoveCustomHomebrew(); break;
                 case "launch": ConfigureLaunchHomebrew(); break;
-                case "clear-launch": Config.LaunchHomebrewId = null; break;
+                case "clear-launch": Config.LaunchHomebrew = null; break;
                 default: return;
             }
         }
@@ -40,10 +40,14 @@ internal static partial class BuilderApp
             return;
         }
 
-        var options = Config.Homebrew
+        var availableHomebrew = Config.Homebrew
             .Where(homebrew => homebrew.EntryPointRelativePath is not null)
-            .Select(homebrew => new MenuOption<string>(homebrew.ID, homebrew.DisplayName, homebrew.Description))
             .ToArray();
+
+        var options = availableHomebrew
+            .Select(homebrew => new MenuOption<string>(homebrew.Artifact.ID, homebrew.Artifact.DisplayName, homebrew.Artifact.Description))
+            .ToArray();
+
         if (options.Length == 0)
         {
             Controls.WriteWarning("No homebrew entries with a known entry point are currently available to launch.");
@@ -51,11 +55,11 @@ internal static partial class BuilderApp
             return;
         }
 
-        Config.LaunchHomebrewId = Controls.PromptSelection("Choose default launch program", options);
+        string selectedLaunch = Controls.PromptSelection("Choose default launch program", options);
+        Config.LaunchHomebrew = availableHomebrew.FirstOrDefault(h => h.Artifact.ID == selectedLaunch);
     }
 
-    private static string GetLaunchDisplayName() =>
-        Config.Homebrew.FirstOrDefault(homebrew => homebrew.ID == Config.LaunchHomebrewId)?.DisplayName ?? "None";
+    private static string GetLaunchDisplayName() => Config.Homebrew.FirstOrDefault(homebrew => homebrew == Config.LaunchHomebrew)?.Artifact.DisplayName ?? "None";
 
     private static void AddCustomHomebrew()
     {
@@ -90,7 +94,7 @@ internal static partial class BuilderApp
             [new InstallOperation(InstallOperationKind.CopyDirectory, $"Apps/{displayName}", ".")],
             ArtifactPriority.Homebrew,
             Path.GetFullPath(sourcePath));
-        var homebrew = new HomebrewEntry(artifact.ID, displayName, "Custom homebrew", artifact, SourcePath: artifact.LocalArchivePath, EntryPointRelativePath: entryPoint);
+        var homebrew = new HomebrewEntry(artifact, SourcePath: artifact.LocalArchivePath, EntryPointRelativePath: entryPoint);
         Config.Homebrew.Add(homebrew);
         Controls.WriteSuccess($"Added {displayName}.");
         Controls.Pause();
@@ -134,13 +138,14 @@ internal static partial class BuilderApp
             return;
         }
 
-        var selectedId = Controls.PromptSelection("Select a homebrew entry to remove", [..Config.Homebrew.Select(homebrew => new MenuOption<string>(homebrew.ID, homebrew.DisplayName, homebrew.SourcePath ?? "Included package"))]);
-        var removed = Config.Homebrew.First(homebrew => homebrew.ID == selectedId);
-        Config.Homebrew.RemoveAll(homebrew => homebrew.ID == selectedId);
-        if (Config.LaunchHomebrewId == selectedId)
-            Config.LaunchHomebrewId = null;
+        var selectedId = Controls.PromptSelection("Select a homebrew entry to remove", [..Config.Homebrew.Select(homebrew => new MenuOption<string>(homebrew.Artifact.ID, homebrew.Artifact.DisplayName, homebrew.SourcePath ?? "Included package"))]);
+        var removed = Config.Homebrew.First(homebrew => homebrew.Artifact.ID == selectedId);
+        Config.Homebrew.RemoveAll(homebrew => homebrew.Artifact.ID == selectedId);
 
-        Controls.WriteSuccess($"Removed {removed.DisplayName}.");
+        if (Config.LaunchHomebrew?.Artifact.ID == selectedId)
+            Config.LaunchHomebrew = null;
+
+        Controls.WriteSuccess($"Removed {removed.Artifact.DisplayName}.");
         Controls.Pause();
     }
 }

@@ -13,13 +13,12 @@ internal enum BootstrapOption
 }
 
 
-internal sealed record GitHubReleaseSource(string Owner, string Repo, string? ReleaseTag = null, string? AssetName = null);
+internal abstract record Source();
+internal sealed record GitHubReleaseSource(string Owner, string Repo, string? ReleaseTag = null, string? AssetName = null) : Source;
+internal sealed record DirectSource(string URL) : Source;
 
 internal sealed record HomebrewEntry(
-    string ID,
-    string DisplayName,
-    string Description,
-    ArtifactDefinition? Artifact = null,
+    ArtifactDefinition Artifact,
     string? SourcePath = null,
     string? EntryPointRelativePath = null);
 
@@ -28,13 +27,14 @@ internal sealed record ArtifactDefinition(
     string DisplayName,
     string Description,
     string DestinationRelativePath,
-    GitHubReleaseSource? Source,
+    Source? Source,
     IReadOnlyList<InstallOperation>? Operations = null,
     ArtifactPriority Priority = ArtifactPriority.Homebrew,
     string? LocalArchivePath = null);
 
 internal enum ArtifactPriority
 {
+    DashboardUpdate,
     RockBandBlitz,
     Exploit,
     Bootstrap,

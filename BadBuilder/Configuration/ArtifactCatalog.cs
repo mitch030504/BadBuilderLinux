@@ -6,17 +6,20 @@ internal sealed class ArtifactCatalog
     private readonly Dictionary<BootstrapOption, ArtifactDefinition> _bootstrapMap;
     private readonly List<HomebrewEntry> _homebrew;
     private readonly ArtifactDefinition  _badUpdateGameData;
+    private readonly ArtifactDefinition  _dashboardUpdate;
 
     private ArtifactCatalog(
         Dictionary<ExploitOption,   ArtifactDefinition> exploitMap,
         Dictionary<BootstrapOption, ArtifactDefinition> bootstrapMap,
         List<HomebrewEntry> homebrew,
-        ArtifactDefinition badUpdateGameData)
+        ArtifactDefinition badUpdateGameData,
+        ArtifactDefinition dashboardUpdate)
     {
         _exploitMap        = exploitMap;
         _bootstrapMap      = bootstrapMap;
         _homebrew          = homebrew;
         _badUpdateGameData = badUpdateGameData;
+        _dashboardUpdate   = dashboardUpdate;
     }
 
     public IReadOnlyDictionary<ExploitOption,   ArtifactDefinition> Exploits   => _exploitMap;
@@ -75,7 +78,7 @@ internal sealed class ArtifactCatalog
                     new InstallOperation(InstallOperationKind.CopyDirectory, "BadUpdatePayload", "."),
                     new InstallOperation(InstallOperationKind.RenameFile, "BadUpdatePayload/default.xex", "BadUpdatePayload/FreeMyXe.xex")
                 ],
-                Priority: ArtifactPriority.Bootstrap
+                ArtifactPriority.Bootstrap
             ),
         };
 
@@ -83,9 +86,6 @@ internal sealed class ArtifactCatalog
         [
             new
             (
-                "homebrew-aurora",
-                "Aurora",
-                "Featured dashboard replacement with plugin support.",
                 new ArtifactDefinition
                 (
                     "homebrew-aurora",
@@ -101,9 +101,6 @@ internal sealed class ArtifactCatalog
 
             new
             (
-                "homebrew-xexmenu",
-                "XeXMenu",
-                "Simple launcher and file manager.",
                 new ArtifactDefinition
                 (
                     "homebrew-xexmenu",
@@ -119,9 +116,6 @@ internal sealed class ArtifactCatalog
 
             new
             (
-                "homebrew-simple360nandflasher",
-                "Simple 360 NAND Flasher",
-                "NAND flashing utility kept available for maintenance scenarios.",
                 new ArtifactDefinition
                 (
                     "homebrew-simple360nandflasher",
@@ -147,23 +141,38 @@ internal sealed class ArtifactCatalog
             ArtifactPriority.RockBandBlitz
         );
 
-        return new ArtifactCatalog(exploitMap, bootstrapMap, homebrew, badUpdateGameData);
+        ArtifactDefinition dashboardUpdate = new
+        (
+            "dashboard-update",
+            "Dashboard Update",
+            "The official Xbox 360 dashboard update package.",
+            string.Empty,
+            new DirectSource("https://download.microsoft.com/download/8/f/4/8f456817-e264-4207-9b95-6efc990fee98/SystemUpdate_17559_USB.zip"),
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")],
+            ArtifactPriority.DashboardUpdate
+        );
+
+        return new ArtifactCatalog(exploitMap, bootstrapMap, homebrew, badUpdateGameData, dashboardUpdate);
     }
 
     public IReadOnlyList<ArtifactDefinition> GetSelectedArtifacts(BuilderConfig config)
     {
-        List<ArtifactDefinition> selected =
-        [
-            _exploitMap[config.SelectedExploit],
-            _bootstrapMap[config.SelectedBootstrap],
-        ];
+        List<ArtifactDefinition> selected = [];
 
-        if (config.SelectedExploit == ExploitOption.BadUpdate)
-            selected.Add(_badUpdateGameData);
+        if (config.FirmwareUpdateEnabled)
+            selected.Add(_dashboardUpdate);
+        else
+        {
+            selected.Add(_exploitMap[config.SelectedExploit]);
+            selected.Add(_bootstrapMap[config.SelectedBootstrap]);
 
-        selected.AddRange(config.Homebrew
-            .Select(homebrew => homebrew.Artifact)
-            .OfType<ArtifactDefinition>());
+            if (config.SelectedExploit == ExploitOption.BadUpdate)
+                selected.Add(_badUpdateGameData);
+
+            selected.AddRange(config.Homebrew
+                .Select(homebrew => homebrew.Artifact)
+                .OfType<ArtifactDefinition>());
+        }
 
         return [..selected.OrderBy(artifact => artifact.Priority)];
     }

@@ -12,7 +12,6 @@ internal static class DownloadService
 
     public static async Task<DownloadResult> DownloadAsync(IReadOnlyList<ArtifactDefinition> artifacts, string downloadRoot, CancellationToken cancellationToken)
     {
-        Controls.PadLine();
         Controls.WriteInfo("Resolving latest releases.");
 
         var resolved = new List<(ArtifactDefinition Artifact, ArtifactReference? Release)>(artifacts.Count);
@@ -123,17 +122,17 @@ internal static class DownloadService
         if (overridePath is not null)
         {
             EnsureFileExists(overridePath);
-            EnsureHashMatches(item.Artifact.DisplayName, FileServices.ComputeSHA256(overridePath), item.Release.ExpectedSha256);
+            EnsureHashMatches(item.Artifact.DisplayName, FileServices.ComputeSHA256(overridePath), item.Release.ExpectedSHA256);
             return new(PlanAction.Use, overridePath, overridePath, manifestPath, item.Release);
         }
 
         if (File.Exists(archivePath))
         {
-            if (item.Release.ExpectedSha256 is not null &&
-                string.Equals(FileServices.ComputeSHA256(archivePath), item.Release.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+            if (item.Release.ExpectedSHA256 is not null &&
+                string.Equals(FileServices.ComputeSHA256(archivePath), item.Release.ExpectedSHA256, StringComparison.OrdinalIgnoreCase))
                 return new(PlanAction.Reuse, archivePath, archivePath, manifestPath, item.Release);
 
-            if (item.Release.ExpectedSha256 is null && manifest is not null &&
+            if (item.Release.ExpectedSHA256 is null && manifest is not null &&
                 string.Equals(manifest.VersionTag, item.Release.VersionTag, StringComparison.OrdinalIgnoreCase))
                 return new(PlanAction.Reuse, archivePath, archivePath, manifestPath, item.Release);
         }
@@ -143,8 +142,18 @@ internal static class DownloadService
 
     private static async Task<ArtifactReference> ResolveReleaseAsync(ArtifactDefinition artifact, CancellationToken cancellationToken)
     {
-        GitHubReleaseSource source = artifact.Source
-            ?? throw new InvalidOperationException($"No remote source is configured for {artifact.DisplayName}.");
+        Source source = artifact.Source ?? throw new InvalidOperationException($"No remote source is configured for {artifact.DisplayName}.");
+
+        return source switch
+        {
+            GitHubReleaseSource githubSource => await ResolveGitHubReleaseAsync(artifact, githubSource, cancellationToken),
+            DirectSource directSource => ResolveDirectSourceAsync(artifact, directSource),
+            _ => throw new InvalidOperationException($"Unsupported source type for {artifact.DisplayName}: {source.GetType().Name}."),
+        };
+    }
+
+    private static async Task<ArtifactReference> ResolveGitHubReleaseAsync(ArtifactDefinition artifact, GitHubReleaseSource source, CancellationToken cancellationToken)
+    {
         try
         {
             Release release;
@@ -180,6 +189,28 @@ internal static class DownloadService
         }
     }
 
+    private static ArtifactReference ResolveDirectSourceAsync(ArtifactDefinition artifact, DirectSource source)
+    {
+        if (string.IsNullOrWhiteSpace(source.URL))
+            throw new InvalidOperationException($"The direct download URL for {artifact.DisplayName} is empty.");
+
+        Uri uri;
+        try
+        {
+            uri = new Uri(source.URL, UriKind.Absolute);
+        }
+        catch (UriFormatException)
+        {
+            throw new InvalidOperationException($"The direct download URL for {artifact.DisplayName} is invalid: {source.URL}");
+        }
+
+        var fileName = Path.GetFileName(uri.GetLeftPart(UriPartial.Path));
+        if (string.IsNullOrWhiteSpace(fileName))
+            fileName = $"{artifact.ID}.bin";
+
+        return new ArtifactReference("direct", fileName, source.URL, null);
+    }
+
     private static bool IsChecksumAsset(string name) =>
         name.Contains("sha256", StringComparison.OrdinalIgnoreCase) ||
         name.Contains("checksum", StringComparison.OrdinalIgnoreCase);
@@ -203,8 +234,8 @@ internal static class DownloadService
             await DownloadArchiveAsync(plan.Source, plan.Target, progress, cancellationToken);
 
         var actualSha256 = FileServices.ComputeSHA256(plan.Target);
-        EnsureHashMatches("downloaded archive", actualSha256, plan.Release?.ExpectedSha256);
-        await WriteManifestAsync(plan.ManifestPath, plan.Release?.VersionTag ?? "local", plan.Target, plan.Release?.ExpectedSha256, actualSha256, cancellationToken);
+        EnsureHashMatches("downloaded archive", actualSha256, plan.Release?.ExpectedSHA256);
+        await WriteManifestAsync(plan.ManifestPath, plan.Release?.VersionTag ?? "local", plan.Target, plan.Release?.ExpectedSHA256, actualSha256, cancellationToken);
     }
 
     private static void EnsureHashMatches(string name, string actualSha256, string? expectedSha256)
@@ -280,7 +311,7 @@ internal static class DownloadService
     }
 
     private sealed record DownloadPlan(PlanAction Action, string Source, string Target, string ManifestPath, ArtifactReference? Release);
-    private sealed record ArtifactReference(string VersionTag, string Name, string DownloadUrl, string? ExpectedSha256);
+    private sealed record ArtifactReference(string VersionTag, string Name, string DownloadUrl, string? ExpectedSHA256);
     private enum PlanAction { Reuse, Use, Download }
 }
 

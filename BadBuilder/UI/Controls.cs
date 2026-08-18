@@ -25,7 +25,7 @@ internal static class Controls
         [#CCE388]██████╔╝██║  ██║██████╔╝██████╔╝╚██████╔╝██║███████╗██████╔╝███████╗██║  ██║[/]
         [#CCE388]╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝ ╚══════╝╚═╝  ╚═╝[/]
 
-        [#76B900]───────────────────────────────────────────────────────────────────────v0.31[/]
+        [#76B900]───────────────────────────────────────────────────────────────────────v2.00[/]
         ───────────────────────Xbox 360 [#FF7200]BadUpdate[/] USB Builder───────────────────────
                                     [#848589]Created by Pdawg[/]
         [#76B900]────────────────────────────────────────────────────────────────────────────[/]
@@ -192,16 +192,24 @@ internal static class Controls
         table.AddColumn(new TableColumn(new Markup($"[bold {green}]Section[/]")).LeftAligned());
         table.AddColumn(new TableColumn(new Markup($"[bold {green}]Selection[/]")).LeftAligned());
 
-        table.AddRow("Drive", $"[gray]{Escape(config.MountPoint ?? "None selected")}[/]");
-        table.AddRow("Exploit", $"[gray]{Escape(config.SelectedExploit.ToString())}[/]");
-        table.AddRow("Bootstrap", $"[gray]{Escape(config.SelectedBootstrap.ToString())}[/]");
+        table.AddRow("Drive", $"[gray]{Escape(config.TargetDisk?.Name ?? "None selected")}[/]");
 
-        string[] homebrew = [..config.Homebrew
-            .Select(homebrew => homebrew.ID == config.LaunchHomebrewId
-                ? $"[{green}]{Escape(homebrew.DisplayName)}[/] [gray](launch)[/]"
-                : $"[gray]{Escape(homebrew.DisplayName)}[/]")];
+        if (config.FirmwareUpdateEnabled)
+        {
+            table.AddRow("Update", "[gray]Update to 2.0.17559.0[/]");
+        }
+        else
+        {
+            table.AddRow("Exploit", $"[gray]{Escape(config.SelectedExploit.ToString())}[/]");
+            table.AddRow("Bootstrap", $"[gray]{Escape(config.SelectedBootstrap.ToString())}[/]");
 
-        table.AddRow("Homebrew", string.Join(", ", homebrew.DefaultIfEmpty("[gray]None[/]")));
+            string[] homebrew = [..config.Homebrew
+            .Select(homebrew => homebrew.Artifact.ID == config.LaunchHomebrew?.Artifact.ID
+                ? $"[{green}]{Escape(homebrew.Artifact.DisplayName)}[/] [gray](launch)[/]"
+                : $"[gray]{Escape(homebrew.Artifact.DisplayName)}[/]")];
+
+            table.AddRow("Homebrew", string.Join(", ", homebrew.DefaultIfEmpty("[gray]None[/]")));
+        }
 
         AnsiConsole.Write(table);
         AnsiConsole.WriteLine();

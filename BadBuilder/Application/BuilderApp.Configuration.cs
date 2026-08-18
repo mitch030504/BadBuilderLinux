@@ -1,5 +1,6 @@
 using BadBuilder.UI;
 using BadBuilder.Configuration;
+using BadBuilder.Services.Disks;
 
 namespace BadBuilder.Application;
 
@@ -9,28 +10,24 @@ internal static partial class BuilderApp
     {
         Controls.RenderHeader();
 
-        var x = DriveInfo.GetDrives();
+        List<DiskInfo> drives = DiskService.EnumerateDisks();
 
-        DriveInfo[] drives = [..DriveInfo.GetDrives()
-            .Where(drive => drive.IsReady)
-            .OrderBy(drive => drive.Name, StringComparer.OrdinalIgnoreCase)];
-
-        if (drives.Length == 0)
+        if (drives.Count == 0)
         {
             Controls.WriteError("No mounted, ready drives were found.");
             Controls.Pause();
             return;
         }
 
-        static string FormatDriveLabel(DriveInfo drive)
+        static string FormatDriveLabel(DiskInfo drive)
         {
-            double sizeGigabytes = drive.TotalSize / 1024d / 1024d / 1024d;
-            return $"{drive.RootDirectory.FullName} ({sizeGigabytes:0.00} GB) - {drive.DriveType}";
+            double sizeGigabytes = drive.Size / 1024d / 1024d / 1024d;
+            return $"{drive.Name} ({sizeGigabytes:0.00} GB) - {drive.Type}";
         }
 
-        Config.MountPoint = Controls.PromptSelection(
+        Config.TargetDisk = Controls.PromptSelection(
             "Choose target drive",
-            [..drives.Select(drive => new MenuOption<string>(drive.RootDirectory.FullName, FormatDriveLabel(drive)))],
+            [..drives.Select(drive => new MenuOption<DiskInfo>(drive, FormatDriveLabel(drive)))],
             "[bold white]All data will be lost on this drive.[/] Make sure to select the correct drive."
         );
     }
@@ -57,11 +54,28 @@ internal static partial class BuilderApp
         );
 
         Config.SelectedBootstrap = selectedBootstrap;
-        if (selectedBootstrap != BootstrapOption.XeUnshackle && Config.LaunchHomebrewId is not null)
+        if (selectedBootstrap != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
         {
-            Config.LaunchHomebrewId = null;
+            Config.LaunchHomebrew = null;
             Controls.WriteWarning("The default homebrew launch selection was cleared because automatic launching requires XeUnshackle.");
             Controls.Pause();
         }
+    }
+
+    private static void PromptUpdate()
+    {
+        Controls.RenderHeader();
+
+        int value = Controls.PromptSelection(
+            "Choose update option",
+            [
+                new MenuOption<int>(1, "Update", "Download and install the latest official firmware update."),
+                new MenuOption<int>(0, "Cancel", "Cancel the update process."),
+                new MenuOption<int>(-1, "Back", "Return to the previous menu without making any changes.")
+            ],
+            "BadUpdate is only compatible with the latest official firmware version, 2.0.17559.0. If your Xbox 360 is not on that version, then you must apply this update before using any exploits."
+        );
+
+        if (value != -1) Config.FirmwareUpdateEnabled = value == 1;
     }
 }
