@@ -21,7 +21,7 @@ BadBuilder is a tool for creating BadUpdate/ABadAvatar USB drives for the Xbox 3
 - Extracts all necessary files automatically.
 - Prepares the USB drive for the selected exploit by copying all required files.
 ### Homebrew Support
-- Aurora, XeXMenu, and Simple 360 NAND Flasher included but toggleable.
+- Aurora, XeXMenu, and Simple 360 NAND Flasher are included but toggleable.
 - Custom homebrew archives may be added via the Homebrew menu.
 - Lets you choose a custom `.xex` entry point and make that application the default launch option.
 - Automatically searches for the entry point (`.xex`) file within the archive.
@@ -35,8 +35,8 @@ BadBuilder is a tool for creating BadUpdate/ABadAvatar USB drives for the Xbox 3
 - 2.b. **Exploit:** Choose between BadUpdate and ABadAvatar depending on your preferences.
 - 2.c. **Post-exploit bootstrap:** Choose between XeUnshackle and FreeMyXe depending on your preferences.
 - 2.d. **Homebrew:** Add new homebrew packages, remove existing ones, and manage the default homebrew to launch via Dashlaunch when `XeUnshackle` is selected as the bootstrap.
-- 2.e. **Update Xbox Dashboard:** This menu allows you to change the deployment to the apply the `2.0.17559.0` dashboard update required by BadUpdate. **This is only mandatory if your Xbox 360 is not already on this dashboard version.**
-- 2.f. **Install:** Begin the deployment process onto your target drive. This is will you will be prompted to format the disk. **Make sure the correct drive is selected.**
+- 2.e. **Update Xbox Dashboard:** This menu allows you to change the deployment to apply the `2.0.17559.0` dashboard update required by BadUpdate. **This is only mandatory if your Xbox 360 is not already on this dashboard version.**
+- 2.f. **Install:** Begin the deployment process onto your target drive. This is where you will be prompted to format the disk. **Make sure the correct drive is selected.**
 > [!CAUTION]
 > Formatting a disk means that all data will be lost. Make sure you have selected the right drive before confirming the format. I am not responsible for any data loss.
 
