@@ -10,9 +10,14 @@ internal static class ArtifactCatalog
             "ABadAvatar",
             "A variant of the exploit targeting the Xbox 360 profile avatar system",
             "exploit",
-            new GitHubReleaseSource("shutterbug2000", "ABadAvatar"),
+            new GitHubReleaseSource(
+                "shutterbug2000",
+                "ABadAvatar",
+                "ABadAvatar-publicbeta*.zip",
+                ReleaseSelectionPolicy.LatestIncludingPrerelease),
             [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".") ],
-            ArtifactPriority.Exploit
+            ArtifactPriority.Exploit,
+            Layout: new ArchiveLayout(["BadUpdatePayload"])
         ),
         [ExploitOption.BadUpdate] = new
         (
@@ -20,9 +25,10 @@ internal static class ArtifactCatalog
             "BadUpdate",
             "The original exploit utilizing savedata exploits in games like Rock Band Blitz",
             "exploit",
-            new GitHubReleaseSource("grimdoomer", "Xbox360BadUpdate"),
+            new GitHubReleaseSource("grimdoomer", "Xbox360BadUpdate", "Xbox360BadUpdate-Retail-USB-*.zip"),
             [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", "Rock Band Blitz") ],
-            ArtifactPriority.Exploit
+            ArtifactPriority.Exploit,
+            Layout: new ArchiveLayout(["Rock Band Blitz"])
         ),
     };
 
@@ -34,9 +40,16 @@ internal static class ArtifactCatalog
             "XeUnshackle",
             "Full payload with Dashlaunch, plugin support, and higher game compatibility",
             "bootstrap",
-            new GitHubReleaseSource("Byrom90", "XeUnshackle"),
-            [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", "<SUBFOLDER>\\.") ],
-            ArtifactPriority.Bootstrap
+            new GitHubReleaseSource("Byrom90", "XeUnshackle", "XeUnshackle-BETA-*.zip"),
+            [
+                new InstallOperation(
+                    InstallOperationKind.CopyDirectory,
+                    ".",
+                    "<SUBFOLDER>/.",
+                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"])
+            ],
+            ArtifactPriority.Bootstrap,
+            Layout: new ArchiveLayout(RequireSingleTopLevelDirectory: true)
         ),
         [BootstrapOption.FreeMyXe] = new
         (
@@ -44,13 +57,18 @@ internal static class ArtifactCatalog
             "FreeMyXe",
             "Lightweight payload designed to apply essential patches for launching homebrew, XeLL, and LibXenon",
             "bootstrap",
-            new GitHubReleaseSource("FreeMyXe", "FreeMyXe"),
+            new GitHubReleaseSource("FreeMyXe", "FreeMyXe", "FreeMyXe-*.zip"),
             Operations:
             [
                 new InstallOperation(InstallOperationKind.CopyDirectory, "BadUpdatePayload", "."),
-                new InstallOperation(InstallOperationKind.RenameFile, "BadUpdatePayload/default.xex", "BadUpdatePayload/FreeMyXe.xex")
+                new InstallOperation(
+                    InstallOperationKind.RenameFile,
+                    "BadUpdatePayload/default.xex",
+                    "BadUpdatePayload/FreeMyXe.xex",
+                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"])
             ],
-            ArtifactPriority.Bootstrap
+            ArtifactPriority.Bootstrap,
+            Layout: new ArchiveLayout(["FreeMyXe.xex"])
         ),
     };
 
@@ -64,9 +82,10 @@ internal static class ArtifactCatalog
                 "Aurora",
                 "Featured dashboard replacement with plugin support.",
                 "homebrew/aurora",
-                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "v0.10a", "Aurora.rar"),
+                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "Aurora.rar", ReleaseSelectionPolicy.ExactTag, "v0.10a"),
                 [ new InstallOperation(InstallOperationKind.CopyDirectory, "Apps/Aurora", ".") ],
-                ArtifactPriority.Homebrew
+                ArtifactPriority.Homebrew,
+                Layout: new ArchiveLayout(["."])
             ),
             EntryPointRelativePath: "Aurora.xex"
         ),
@@ -78,9 +97,10 @@ internal static class ArtifactCatalog
                 "XeXMenu",
                 "Simple launcher and file manager.",
                 "homebrew/xexmenu",
-                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "v0.10a", "MenuData.7z"),
+                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "MenuData.7z", ReleaseSelectionPolicy.ExactTag, "v0.10a"),
                 [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".") ],
-                ArtifactPriority.Homebrew
+                ArtifactPriority.Homebrew,
+                Layout: new ArchiveLayout(["."])
             ),
             EntryPointRelativePath: null
         ),
@@ -92,11 +112,12 @@ internal static class ArtifactCatalog
                 "Simple 360 NAND Flasher",
                 "NAND flashing utility kept available for maintenance scenarios.",
                 "homebrew/simple360nandflasher",
-                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "v0.10a", "Flasher.7z"),
+                new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "Flasher.7z", ReleaseSelectionPolicy.ExactTag, "v0.10a"),
                 [ new InstallOperation(InstallOperationKind.CopyDirectory, "Apps/Simple 360 NAND Flasher", "Simple 360 NAND Flasher") ],
-                ArtifactPriority.Homebrew
+                ArtifactPriority.Homebrew,
+                Layout: new ArchiveLayout(["Simple 360 NAND Flasher"])
             ),
-            EntryPointRelativePath: "Simple 360 NAND Flasher/Default.xex"
+            EntryPointRelativePath: "Default.xex"
         ),
     ];
 
@@ -106,9 +127,10 @@ internal static class ArtifactCatalog
         "Rock Band Blitz",
         "Game data required by the BadUpdate package.",
         string.Empty,
-        new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "v0.10a", "GameData.zip"),
+        new GitHubReleaseSource("Pdawg-bytes", "BadBuilder", "GameData.zip", ReleaseSelectionPolicy.ExactTag, "v0.10a"),
         [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".") ],
-        ArtifactPriority.RockBandBlitz
+        ArtifactPriority.RockBandBlitz,
+        Layout: new ArchiveLayout(["."])
     );
 
     private static readonly ArtifactDefinition DashboardUpdate = new
@@ -119,13 +141,23 @@ internal static class ArtifactCatalog
         string.Empty,
         new DirectSource("https://download.microsoft.com/download/8/f/4/8f456817-e264-4207-9b95-6efc990fee98/SystemUpdate_17559_USB.zip"),
         [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")],
-        ArtifactPriority.DashboardUpdate
+        ArtifactPriority.DashboardUpdate,
+        Layout: new ArchiveLayout(["$SystemUpdate"])
     );
 
 
     internal static IReadOnlyDictionary<ExploitOption,   ArtifactDefinition> Exploits   => ExploitMap;
     internal static IReadOnlyDictionary<BootstrapOption, ArtifactDefinition> Bootstraps => BootstrapMap;
     internal static IReadOnlyList<HomebrewEntry> Homebrew                               => HomebrewEntries;
+
+    internal static IReadOnlyList<ArtifactDefinition> GetAllBuiltInArtifacts() =>
+    [
+        ..ExploitMap.Values,
+        ..BootstrapMap.Values,
+        ..HomebrewEntries.Select(entry => entry.Artifact),
+        BadUpdateGameData,
+        DashboardUpdate,
+    ];
 
     internal static IReadOnlyList<ArtifactDefinition> GetSelectedArtifacts(BuilderConfig config)
     {

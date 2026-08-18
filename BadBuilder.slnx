@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="BadBuilder.Tests/BadBuilder.Tests.csproj" />
   <Project Path="BadBuilder/BadBuilder.csproj" />
 </Solution>

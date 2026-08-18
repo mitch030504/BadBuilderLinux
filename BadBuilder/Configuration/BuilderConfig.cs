@@ -6,7 +6,6 @@ internal sealed class BuilderConfig
 {
     internal BuilderConfig(IEnumerable<HomebrewEntry> builtInHomebrew) =>Homebrew.AddRange(builtInHomebrew);
 
-    internal string? MountPoint   { get; set; }
     internal DiskInfo? TargetDisk { get; set; }
 
     internal ExploitOption SelectedExploit     { get; set; } = ExploitOption.BadUpdate;
@@ -15,7 +14,7 @@ internal sealed class BuilderConfig
     internal List<HomebrewEntry> Homebrew  { get; } = [];
     internal HomebrewEntry? LaunchHomebrew { get; set; }
 
-    internal bool FirmwareUpdateEnabled { get; set; } = false;
+    internal bool FirmwareUpdateEnabled { get; set; }
 
     public override string ToString()
     {

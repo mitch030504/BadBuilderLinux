@@ -65,7 +65,26 @@ internal static partial class BuilderApp
                 return;
         }
 
-        string displayName = Path.GetFileNameWithoutExtension(FileServices.NormalizeUserPath(sourcePath));
+        string displayName;
+        try
+        {
+            displayName = FileServices.SanitizeFatName(
+                Path.GetFileNameWithoutExtension(FileServices.NormalizeUserPath(sourcePath)));
+        }
+        catch (InvalidDataException ex)
+        {
+            Controls.WriteError(ex.Message);
+            Controls.Pause();
+            return;
+        }
+
+        if (Config.Homebrew.Any(homebrew =>
+            string.Equals(homebrew.Artifact.DisplayName, displayName, StringComparison.OrdinalIgnoreCase)))
+        {
+            Controls.WriteError($"A homebrew destination named '{displayName}' is already configured.");
+            Controls.Pause();
+            return;
+        }
 
         ArtifactDefinition artifact = new(
             $"homebrew-{Guid.NewGuid():N}",
@@ -75,7 +94,8 @@ internal static partial class BuilderApp
             null,
             [new InstallOperation(InstallOperationKind.CopyDirectory, $"Apps/{displayName}", ".")],
             ArtifactPriority.Homebrew,
-            Path.GetFullPath(sourcePath)
+            Path.GetFullPath(sourcePath),
+            new ArchiveLayout(["."])
         );
 
         HomebrewEntry homebrew = new(artifact, SourcePath: artifact.LocalArchivePath, EntryPointRelativePath: entryPoint);

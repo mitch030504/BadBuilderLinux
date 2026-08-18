@@ -6,15 +6,15 @@ namespace BadBuilder.Application;
 
 internal static partial class BuilderApp
 {
-    private static void ConfigureDrive()
+    private static async Task ConfigureDriveAsync(CancellationToken cancellationToken)
     {
         Controls.RenderHeader();
 
-        List<DiskInfo> drives = DiskService.EnumerateDisks();
+        IReadOnlyList<DiskInfo> drives = await DiskService.EnumerateDisksAsync(cancellationToken);
 
         if (drives.Count == 0)
         {
-            Controls.WriteError("No mounted, ready drives were found.");
+            Controls.WriteError("No eligible writable USB/removable disks were found. System, fixed, and read-only disks are excluded.");
             Controls.Pause();
             return;
         }
@@ -22,13 +22,14 @@ internal static partial class BuilderApp
         static string FormatDriveLabel(DiskInfo drive)
         {
             double sizeGigabytes = drive.Size / 1024d / 1024d / 1024d;
-            return $"{drive.Name} ({sizeGigabytes:0.00} GB) - {drive.Type}";
+            string serial = string.IsNullOrWhiteSpace(drive.Serial) ? "no serial" : drive.Serial;
+            return $"{drive.DevicePath} — {drive.Name} ({sizeGigabytes:0.00} GB, {serial})";
         }
 
         Config.TargetDisk = Controls.PromptSelection(
             "Choose target drive",
             [..drives.Select(drive => new MenuOption<DiskInfo>(drive, FormatDriveLabel(drive)))],
-            "[bold white]All data will be lost on this drive.[/] Make sure to select the correct drive."
+            "All data will be lost on this drive. Make sure to select the correct drive."
         );
     }
 

@@ -1,0 +1,78 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary: BadBuilder
+          - os: windows-latest
+            rid: win-x64
+            binary: BadBuilder.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+
+      - name: Restore
+        run: dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj
+
+      - name: Audit dependencies
+        run: dotnet list BadBuilder/BadBuilder.csproj package --vulnerable --include-transitive
+
+      - name: Warning-free build
+        run: dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
+
+      - name: Unit tests
+        run: dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-build --no-restore
+
+      - name: Publish single-file binary
+        run: dotnet publish BadBuilder/BadBuilder.csproj -c Release -r ${{ matrix.rid }} --self-contained true --no-restore -o artifacts/${{ matrix.rid }}
+
+      - name: Smoke test version (Linux)
+        if: runner.os == 'Linux'
+        run: artifacts/${{ matrix.rid }}/${{ matrix.binary }} --version
+
+      - name: Smoke test version (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./artifacts/${{ matrix.rid }}/${{ matrix.binary }} --version
+
+      - name: SHA-256 (Linux)
+        if: runner.os == 'Linux'
+        working-directory: artifacts/${{ matrix.rid }}
+        run: sha256sum ${{ matrix.binary }} > ${{ matrix.binary }}.sha256
+
+      - name: SHA-256 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: artifacts/${{ matrix.rid }}
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 '${{ matrix.binary }}').Hash.ToLowerInvariant()
+          "$hash  ${{ matrix.binary }}" | Set-Content -Encoding ascii '${{ matrix.binary }}.sha256'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BadBuilder-${{ matrix.rid }}
+          path: |
+            artifacts/${{ matrix.rid }}/${{ matrix.binary }}
+            artifacts/${{ matrix.rid }}/${{ matrix.binary }}.sha256
+          if-no-files-found: error

@@ -1,5 +1,6 @@
 using Spectre.Console;
 using BadBuilder.Configuration;
+using BadBuilder.Application;
 
 namespace BadBuilder.UI;
 
@@ -20,8 +21,9 @@ internal static class Controls
     internal static void RenderHeader()
     {
         AnsiConsole.Clear();
+        string version = Escape(AppVersion.Display);
         AnsiConsole.Markup(
-        """
+        $$"""
         [#4D8C00]██████╗  █████╗ ██████╗ ██████╗ ██╗   ██╗██╗██╗     ██████╗ ███████╗██████╗[/]
         [#65A800]██╔══██╗██╔══██╗██╔══██╗██╔══██╗██║   ██║██║██║     ██╔══██╗██╔════╝██╔══██╗[/]
         [#76B900]██████╔╝███████║██║  ██║██████╔╝██║   ██║██║██║     ██║  ██║█████╗  ██████╔╝[/]
@@ -29,7 +31,7 @@ internal static class Controls
         [#CCE388]██████╔╝██║  ██║██████╔╝██████╔╝╚██████╔╝██║███████╗██████╔╝███████╗██║  ██║[/]
         [#CCE388]╚═════╝ ╚═╝  ╚═╝╚═════╝ ╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝ ╚══════╝╚═╝  ╚═╝[/]
 
-        [#76B900]───────────────────────────────────────────────────────────────────────v2.00[/]
+        [#76B900]───────────────────────────────────────────────────────────────────────v{{version}}[/]
         ───────────────────────Xbox 360 [#FF7200]BadUpdate[/] USB Builder───────────────────────
                                     [#848589]Created by Pdawg[/]
         [#76B900]────────────────────────────────────────────────────────────────────────────[/]
@@ -40,16 +42,16 @@ internal static class Controls
 
     internal static void PadLine() => AnsiConsole.WriteLine();
 
-    internal static void WriteInfo(string message)    => AnsiConsole.MarkupLine($"[yellow]{Escape("[*]")}[/] {message}");
-    internal static void WriteWarning(string message) => AnsiConsole.MarkupLine($"[{ToMarkupColor(AppTheme.LightOrangeStyle.Foreground)}]{Escape("[!]")}[/] {message}");
-    internal static void WriteError(string message)   => AnsiConsole.MarkupLine($"[red]{Escape("[-]")}[/] {message}");
-    internal static void WriteSuccess(string message) => AnsiConsole.MarkupLine($"[{ToMarkupColor(AppTheme.GreenStyle.Foreground)}]{Escape("[+]")}[/] {message}");
+    internal static void WriteInfo(string message)    => AnsiConsole.MarkupLine($"[yellow]{Escape("[*]")}[/] {Escape(message)}");
+    internal static void WriteWarning(string message) => AnsiConsole.MarkupLine($"[{ToMarkupColor(AppTheme.LightOrangeStyle.Foreground)}]{Escape("[!]")}[/] {Escape(message)}");
+    internal static void WriteError(string message)   => AnsiConsole.MarkupLine($"[red]{Escape("[-]")}[/] {Escape(message)}");
+    internal static void WriteSuccess(string message) => AnsiConsole.MarkupLine($"[{ToMarkupColor(AppTheme.GreenStyle.Foreground)}]{Escape("[+]")}[/] {Escape(message)}");
 
 
     internal static T PromptSelection<T>(string title, IReadOnlyList<MenuOption<T>> options, string? details = null) => AnsiConsole.Prompt(
         new SelectionPrompt<MenuOption<T>>()
             .Title($"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)}]{Escape(title)}[/]" +
-                   $"{(!string.IsNullOrWhiteSpace(details) ? $"\n[gray]{details}[/]" : "")}")
+                   $"{(!string.IsNullOrWhiteSpace(details) ? $"\n[gray]{Escape(details)}[/]" : "")}")
             .PageSize(10)
             .HighlightStyle(AppTheme.GreenStyle)
             .UseConverter(option =>
@@ -68,7 +70,7 @@ internal static class Controls
     {
         var prompt = new MultiSelectionPrompt<MenuOption<T>>()
             .Title($"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)}]{Escape(title)}[/]" +
-                   $"{(!string.IsNullOrWhiteSpace(details) ? $"\n[gray]{details}[/]" : "")}")
+                   $"{(!string.IsNullOrWhiteSpace(details) ? $"\n[gray]{Escape(details)}[/]" : "")}")
             .PageSize(10)
             .NotRequired()
             .HighlightStyle(AppTheme.GreenStyle)
@@ -91,7 +93,7 @@ internal static class Controls
     }
 
     internal static bool Confirm(string title, bool defaultValue = true, bool warning = false) => AnsiConsole.Prompt(
-        new TextPrompt<bool>($"{(warning ? $"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)} bold]WARNING:[/] {title}" : title)}")
+        new TextPrompt<bool>($"{(warning ? $"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)} bold]WARNING:[/] {Escape(title)}" : Escape(title))}")
             .AddChoice(true)
             .AddChoice(false)
             .DefaultValue(defaultValue)
