@@ -27,6 +27,26 @@ public sealed class GitHubAndDownloadTests
         Assert.Equal("preview", selectedPreview.TagName);
     }
 
+
+    [Fact]
+    public void Catalog_ABadAvatar13Beta_IsPinnedToExpectedReleaseAndDigest()
+    {
+        ArtifactDefinition artifact = ArtifactCatalog.Exploits[ExploitOption.ABadAvatar13Beta];
+        GitHubReleaseSource source = Assert.IsType<GitHubReleaseSource>(artifact.Source);
+
+        Assert.Equal("ABadAvatar 1.3 Beta", artifact.DisplayName);
+        Assert.Equal("bibarub", source.Owner);
+        Assert.Equal("Xbox360BadUpdate", source.Repo);
+        Assert.Equal("ABadAvatar_v1.3-beta.zip", source.AssetPattern);
+        Assert.Equal(ReleaseSelectionPolicy.ExactTag, source.ReleasePolicy);
+        Assert.Equal("avatar-v1.3-beta", source.ReleaseTag);
+        Assert.Equal(
+            "A94E0948A5F10AA288BA3A5909B55F90AE56C3CFA628B9D429E178737A0F1E35",
+            source.PinnedSHA256);
+        Assert.Contains("BadUpdatePayload", artifact.Layout?.RequiredPaths ?? []);
+        Assert.Contains("Content", artifact.Layout?.RequiredPaths ?? []);
+    }
+
     [Fact]
     public void AssetSelection_RequiresExactlyOneGlobMatch()
     {
