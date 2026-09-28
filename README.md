@@ -34,12 +34,15 @@ Do not run `sudo ./BadBuilder`. Interactive root launches are refused.
 ## Using BadBuilder
 
 1. Open **Target drive** and choose the USB device. Fixed and protected disks are not shown.
-2. Select BadUpdate or ABadAvatar, a post-exploit bootstrap, and any desired homebrew. Dashboard Update is a separate install mode for official `2.0.17559.0` update files.
+2. Select BadUpdate, ABadAvatar Public Beta, or the pinned ABadAvatar 1.3 Beta build, then choose a post-exploit bootstrap and any desired homebrew. Dashboard Update is a separate install mode for official `2.0.17559.0` update files.
 3. Choose **Install**. BadBuilder resolves releases, verifies or explicitly approves hashes, extracts into a unique temporary run directory, validates layouts, and builds the complete copy plan.
 4. Review the displayed path, model, byte size, and serial/WWN. Type the exact device path to authorize formatting.
 5. Wait for the success message. Linux automatically flushes and unmounts the USB. Windows leaves its assigned drive letter in place for normal eject.
 
 Expected disk, network, cache, and archive errors are shown as actionable messages and return to the menu. Detailed stack traces are written only to the per-user diagnostic log.
+
+> [!WARNING]
+> ABadAvatar 1.3 Beta is still a prerelease. Disconnect the Xbox 360 from both Ethernet and Wi-Fi before triggering it. Its release notes also warn that a connected Kinect can significantly reduce the exploit success rate.
 
 ## Storage locations
 
@@ -52,7 +55,7 @@ Transient extraction uses a unique directory below the operating-system temporar
 
 ## Download integrity
 
-GitHub release sources use an exact asset glob and an explicit release policy. Drafts are never selected; ABadAvatar may use its newest prerelease, while other moving sources use the newest stable release. Zero or multiple matching assets are errors. GitHub's per-asset `digest` metadata and catalog-pinned SHA-256 values are treated as trusted and enforced strictly.
+GitHub release sources use an exact asset glob and an explicit release policy. Drafts are never selected; the original ABadAvatar entry may use its newest prerelease, while ABadAvatar 1.3 Beta is pinned to the exact `avatar-v1.3-beta` release and SHA-256. Other moving sources use the newest stable release. Zero or multiple matching assets are errors. GitHub's per-asset `digest` metadata and catalog-pinned SHA-256 values are treated as trusted and enforced strictly.
 
 When a trusted checksum is unavailable, BadBuilder displays the source, release, asset, and computed SHA-256 and asks for explicit approval. The approved bytes are recorded in the cache manifest; changed bytes trigger a new warning. Downloads stream into a partial file, verify their length and hash, and replace a cache entry only after success. A failed download cannot overwrite a valid cached archive.
 
@@ -86,6 +89,7 @@ If release metadata is unavailable and no valid cache exists, BadBuilder asks fo
 - Pdawg11239 / [Pdawg-bytes](https://github.com/Pdawg-bytes/BadBuilder) — original BadBuilder project
 - Grimdoomer — [BadUpdate](https://github.com/grimdoomer/Xbox360BadUpdate)
 - Shutterbug2000 — [ABadAvatar](https://github.com/shutterbug2000/ABadAvatar)
+- Bibarub — [ABadAvatar 1.3 Beta](https://github.com/bibarub/Xbox360BadUpdate/releases/tag/avatar-v1.3-beta)
 - FreeMyXe Team / InvoxiPlayGames — [FreeMyXe](https://github.com/FreeMyXe/FreeMyXe)
 - Byrom90 — [XeUnshackle](https://github.com/Byrom90/XeUnshackle)
 - Swizzy — Simple 360 NAND Flasher

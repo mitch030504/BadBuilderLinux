@@ -3,6 +3,7 @@
 internal enum ExploitOption
 {
     ABadAvatar,
+    ABadAvatar13Beta,
     BadUpdate,
 }
 

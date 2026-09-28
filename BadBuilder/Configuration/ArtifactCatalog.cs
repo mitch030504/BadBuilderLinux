@@ -19,6 +19,23 @@ internal static class ArtifactCatalog
             ArtifactPriority.Exploit,
             Layout: new ArchiveLayout(["BadUpdatePayload"])
         ),
+        [ExploitOption.ABadAvatar13Beta] = new
+        (
+            "exploit-abadavatar-1-3-beta",
+            "ABadAvatar 1.3 Beta",
+            "ABadAvatar rebased on BadUpdate 1.3 for much faster and more reliable execution; still beta",
+            "exploit",
+            new GitHubReleaseSource(
+                "bibarub",
+                "Xbox360BadUpdate",
+                "ABadAvatar_v1.3-beta.zip",
+                ReleaseSelectionPolicy.ExactTag,
+                "avatar-v1.3-beta",
+                "A94E0948A5F10AA288BA3A5909B55F90AE56C3CFA628B9D429E178737A0F1E35"),
+            [ new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".") ],
+            ArtifactPriority.Exploit,
+            Layout: new ArchiveLayout(["BadUpdatePayload", "Content"])
+        ),
         [ExploitOption.BadUpdate] = new
         (
             "exploit-badupdate",
