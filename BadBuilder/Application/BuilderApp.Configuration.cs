@@ -26,37 +26,55 @@ internal static partial class BuilderApp
             return $"{drive.DevicePath} — {drive.Name} ({sizeGigabytes:0.00} GB, {serial})";
         }
 
-        Config.TargetDisk = Controls.PromptSelection(
+        DiskInfo? targetDisk = Controls.PromptSelection(
             "Choose target drive",
-            [..drives.Select(drive => new MenuOption<DiskInfo>(drive, FormatDriveLabel(drive)))],
+            [
+                ..drives.Select(drive => new MenuOption<DiskInfo?>(drive, FormatDriveLabel(drive))),
+                new MenuOption<DiskInfo?>(null, "Back")
+            ],
             "All data will be lost on this drive. Make sure to select the correct drive."
         );
+
+        if (targetDisk is not null)
+            Config.TargetDisk = targetDisk;
     }
 
     private static void ConfigureExploit()
     {
         Controls.RenderHeader();
 
-        Config.SelectedExploit = Controls.PromptSelection(
+        ExploitOption? selected = Controls.PromptSelection(
             "Choose exploit",
-            [..ArtifactCatalog.Exploits.Select(pair => new MenuOption<ExploitOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
+            [
+                ..ArtifactCatalog.Exploits.Select(pair => new MenuOption<ExploitOption?>(pair.Key, pair.Value.DisplayName, pair.Value.Description)),
+                new MenuOption<ExploitOption?>(null, "Back")
+            ],
             "Executes the console exploit and unlocks the hypervisor, allowing further unsigned code execution."
         );
+
+        if (selected is not null)
+            Config.SelectedExploit = selected.Value;
     }
 
     private static void ConfigureBootstrap()
     {
         Controls.RenderHeader();
 
-        BootstrapOption selected = Controls.PromptSelection(
+        BootstrapOption? selected = Controls.PromptSelection(
             "Choose post-exploit bootstrap",
-            [..ArtifactCatalog.Bootstraps.Select(pair => new MenuOption<BootstrapOption>(pair.Key, pair.Value.DisplayName, pair.Value.Description))],
+            [
+                ..ArtifactCatalog.Bootstraps.Select(pair => new MenuOption<BootstrapOption?>(pair.Key, pair.Value.DisplayName, pair.Value.Description)),
+                new MenuOption<BootstrapOption?>(null, "Back")
+            ],
             "The payload executed immediately after a successful hypervisor exploit to patch the kernel and initialize homebrew capabilities."
         );
 
-        Config.SelectedBootstrap = selected;
+        if (selected is null)
+            return;
 
-        if (selected != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
+        Config.SelectedBootstrap = selected.Value;
+
+        if (selected.Value != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
         {
             Config.LaunchHomebrew = null;
             Controls.WriteWarning("The default homebrew launch selection was cleared because automatic launching requires XeUnshackle.");
