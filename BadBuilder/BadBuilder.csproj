@@ -10,7 +10,7 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <VersionPrefix>2.1.0</VersionPrefix>
+    <VersionPrefix>2.1.1</VersionPrefix>
     <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     <PublishSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
     <SelfContained Condition="'$(RuntimeIdentifier)' != ''">true</SelfContained>
@@ -19,12 +19,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LTRData.DiscUtils.Core" Version="1.0.88" />
-    <PackageReference Include="LTRData.DiscUtils.Fat" Version="1.0.88" />
-    <PackageReference Include="LTRData.DiscUtils.Streams" Version="1.0.88" />
+    <PackageReference Include="LTRData.DiscUtils.Core" Version="1.0.89" />
+    <PackageReference Include="LTRData.DiscUtils.Fat" Version="1.0.89" />
+    <PackageReference Include="LTRData.DiscUtils.Streams" Version="1.0.89" />
     <PackageReference Include="SharpCompress" Version="0.50.4" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
-    <PackageReference Include="System.Management" Version="10.0.11" />
+    <PackageReference Include="System.Management" Version="10.0.12" />
   </ItemGroup>
 
   <ItemGroup>
