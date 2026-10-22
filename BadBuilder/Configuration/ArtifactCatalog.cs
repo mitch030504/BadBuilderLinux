@@ -63,7 +63,7 @@ internal static class ArtifactCatalog
                     InstallOperationKind.CopyDirectory,
                     ".",
                     "<SUBFOLDER>/.",
-                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"])
+                    OptionalOverwritePaths: ["BadUpdatePayload/default.xex"])
             ],
             ArtifactPriority.Bootstrap,
             Layout: new ArchiveLayout(RequireSingleTopLevelDirectory: true)
@@ -87,7 +87,7 @@ internal static class ArtifactCatalog
                     InstallOperationKind.CopyDirectory,
                     "BadUpdatePayload",
                     "<SUBFOLDER>/BadUpdatePayload",
-                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"]),
+                    OptionalOverwritePaths: ["BadUpdatePayload/default.xex"]),
                 new InstallOperation(
                     InstallOperationKind.CopyFile,
                     "launch.ini",

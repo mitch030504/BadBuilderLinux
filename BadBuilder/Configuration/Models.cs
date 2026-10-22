@@ -75,7 +75,8 @@ internal sealed record InstallOperation(
     string DestinationPath,
     string? SourcePath = null,
     string? Contents = null,
-    IReadOnlyList<string>? AllowedOverwritePaths = null);
+    IReadOnlyList<string>? AllowedOverwritePaths = null,
+    IReadOnlyList<string>? OptionalOverwritePaths = null);
 
 internal enum InstallOperationKind
 {

@@ -64,7 +64,8 @@ public sealed class GitHubAndDownloadTests
         Assert.Equal(2, artifact.Operations?.Count);
         Assert.Equal("BadUpdatePayload", artifact.Operations![0].DestinationPath);
         Assert.Equal("<SUBFOLDER>/BadUpdatePayload", artifact.Operations[0].SourcePath);
-        Assert.Contains("BadUpdatePayload/default.xex", artifact.Operations[0].AllowedOverwritePaths ?? []);
+        Assert.Contains("BadUpdatePayload/default.xex", artifact.Operations[0].OptionalOverwritePaths ?? []);
+        Assert.Empty(artifact.Operations[0].AllowedOverwritePaths ?? []);
         Assert.Equal("launch.ini", artifact.Operations[1].DestinationPath);
         Assert.Equal("<SUBFOLDER>/launch.ini", artifact.Operations[1].SourcePath);
     }

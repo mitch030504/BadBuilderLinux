@@ -126,18 +126,28 @@ internal static class InstallService
         HashSet<string> allowedOverwritePaths = new(
             (operation.AllowedOverwritePaths ?? []).Select(NormalizeTargetPath),
             StringComparer.OrdinalIgnoreCase);
+        HashSet<string> optionalOverwritePaths = new(
+            (operation.OptionalOverwritePaths ?? []).Select(NormalizeTargetPath),
+            StringComparer.OrdinalIgnoreCase);
+        if (optionalOverwritePaths.Overlaps(allowedOverwritePaths))
+            throw new InvalidDataException("A path cannot be both a required and optional overwrite.");
+
         HashSet<string> matchedOverwritePaths = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> producedOptionalPaths = new(StringComparer.OrdinalIgnoreCase);
 
         bool AddPlannedDestination(string path, long size)
         {
-            bool explicitlyAllowed = allowedOverwritePaths.Contains(path);
+            bool required = allowedOverwritePaths.Contains(path);
+            bool optional = optionalOverwritePaths.Contains(path);
             bool collided = AddDestination(
                 destinationFiles,
                 path,
                 size,
-                allowOverwrite || explicitlyAllowed);
-            if (collided && explicitlyAllowed)
+                allowOverwrite || required || optional);
+            if (collided && required)
                 matchedOverwritePaths.Add(path);
+            if (optional)
+                producedOptionalPaths.Add(path);
             return collided;
         }
 
@@ -208,6 +218,13 @@ internal static class InstallService
         {
             throw new InvalidDataException(
                 $"The expected installation overwrite did not occur: {string.Join(", ", unmatched)}");
+        }
+
+        string[] absentOptional = [..optionalOverwritePaths.Except(producedOptionalPaths, StringComparer.OrdinalIgnoreCase)];
+        if (absentOptional.Length > 0)
+        {
+            throw new InvalidDataException(
+                $"The optional installation overlay source was not present: {string.Join(", ", absentOptional)}");
         }
     }
 
