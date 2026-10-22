@@ -150,8 +150,10 @@ public sealed class InstallAndFormattingTests
             [(firstArtifact, first), (missingExpected, second)], [], 128L * 1024 * 1024));
     }
 
-    [Fact]
-    public async Task XeUnshackleMax_OverlaysOnlyPayloadAndLaunchConfig()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task XeUnshackleMax_OverlaysOnlyPayloadAndLaunchConfig(bool exploitHasDefaultXex)
     {
         using TemporaryDirectory temporary = new();
         string exploitRoot = Path.Combine(temporary.Path, "exploit");
@@ -162,7 +164,10 @@ public sealed class InstallAndFormattingTests
         Directory.CreateDirectory(Path.Combine(maxFolder, "BadUpdatePayload"));
         Directory.CreateDirectory(target);
 
-        await File.WriteAllTextAsync(Path.Combine(exploitRoot, "BadUpdatePayload", "default.xex"), "exploit");
+        if (exploitHasDefaultXex)
+            await File.WriteAllTextAsync(Path.Combine(exploitRoot, "BadUpdatePayload", "default.xex"), "exploit");
+        else
+            await File.WriteAllTextAsync(Path.Combine(exploitRoot, "BadUpdatePayload", "stage2.bin"), "exploit");
         await File.WriteAllTextAsync(Path.Combine(maxFolder, "BadUpdatePayload", "default.xex"), "max");
         await File.WriteAllTextAsync(Path.Combine(maxFolder, "BadUpdatePayload", "BadStorage.xex.dll"), "storage");
         await File.WriteAllTextAsync(Path.Combine(maxFolder, "launch.ini"), "[Paths]");
@@ -182,6 +187,61 @@ public sealed class InstallAndFormattingTests
         Assert.True(File.Exists(Path.Combine(target, "launch.ini")));
         Assert.False(File.Exists(Path.Combine(target, "JRPC2.xex")));
         Assert.False(File.Exists(Path.Combine(target, "Xbdm.xex")));
+    }
+
+    [Fact]
+    public void OptionalOverwrite_RejectsUndeclaredCollision()
+    {
+        using TemporaryDirectory temp = new();
+        string first = Path.Combine(temp.Path, "first");
+        string second = Path.Combine(temp.Path, "second");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        File.WriteAllText(Path.Combine(first, "default.xex"), "one");
+        File.WriteAllText(Path.Combine(first, "other.bin"), "one");
+        File.WriteAllText(Path.Combine(second, "default.xex"), "two");
+        File.WriteAllText(Path.Combine(second, "other.bin"), "two");
+        ArtifactDefinition exploit = new("exploit", "Exploit", "Test", "", null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")]);
+        ArtifactDefinition bootstrap = new("bootstrap", "Bootstrap", "Test", "", null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".",
+                OptionalOverwritePaths: ["default.xex"])]);
+        Assert.Throws<InvalidDataException>(() => InstallService.BuildPlan(
+            [(exploit, first), (bootstrap, second)], [], 128L * 1024 * 1024));
+    }
+
+    [Fact]
+    public void OptionalOverwrite_RequiresTheOverlayFileToBeProduced()
+    {
+        using TemporaryDirectory temp = new();
+        File.WriteAllText(Path.Combine(temp.Path, "other.bin"), "contents");
+        ArtifactDefinition artifact = new("bootstrap", "Bootstrap", "Test", "", null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".",
+                OptionalOverwritePaths: ["default.xex"])]);
+        Assert.Throws<InvalidDataException>(() => InstallService.BuildPlan(
+            [(artifact, temp.Path)], [], 128L * 1024 * 1024));
+    }
+
+    [Fact]
+    public async Task OriginalXeUnshackle_InstallsEvenWhenExploitHasNoDefaultXex()
+    {
+        using TemporaryDirectory temp = new();
+        string first = Path.Combine(temp.Path, "exploit");
+        string second = Path.Combine(temp.Path, "bootstrap");
+        string wrapped = Path.Combine(second, "XeUnshackle-BETA");
+        string target = Path.Combine(temp.Path, "target");
+        Directory.CreateDirectory(Path.Combine(first, "BadUpdatePayload"));
+        Directory.CreateDirectory(Path.Combine(wrapped, "BadUpdatePayload"));
+        Directory.CreateDirectory(target);
+        await File.WriteAllTextAsync(Path.Combine(first, "BadUpdatePayload", "stage2.bin"), "exploit");
+        await File.WriteAllTextAsync(Path.Combine(wrapped, "BadUpdatePayload", "default.xex"), "bootstrap");
+        ArtifactDefinition exploit = new("exploit", "Exploit", "Test", "", null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")]);
+        InstallPlan plan = InstallService.BuildPlan(
+            [(exploit, first), (ArtifactCatalog.Bootstraps[BootstrapOption.XeUnshackle], second)],
+            [], 128L * 1024 * 1024);
+        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        Assert.Equal("bootstrap", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
     }
 
     [Fact]

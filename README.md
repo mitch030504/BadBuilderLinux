@@ -46,6 +46,8 @@ Expected disk, network, cache, and archive errors are shown as actionable messag
 
 ## XeUnshackle Max
 
+**Fixed in v2.3.1:** A missing exploit-side `BadUpdatePayload/default.xex` no longer makes the XeUnshackle or XeUnshackle Max install plan fail. That file may be created or overwritten as needed; all other undeclared collisions are still rejected.
+
 XeUnshackle Max is an additional post-exploit bootstrap choice alongside the original XeUnshackle and FreeMyXe. Its pinned source is [klofi/XeUnshackle-Max v1.0.0](https://github.com/klofi/XeUnshackle-Max/releases/tag/v1.0.0), an independent **beta** fork of Byrom90's XeUnshackle.
 
 The fork adds optional automatic startup, CPU/DVD-key masking, boot-video skipping and volume control, and custom boot-video playback. On the Xbox 360, pressing Start can create a XeUnshackleConfig.txt next to BadUpdatePayload/default.xex. See the [upstream configuration documentation](https://github.com/klofi/XeUnshackle-Max#features). Both XeUnshackle variants support default homebrew launching through launch.ini.
