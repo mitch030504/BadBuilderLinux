@@ -10,9 +10,16 @@ internal enum ExploitOption
 internal enum BootstrapOption
 {
     XeUnshackle,
+    XeUnshackleMax,
     FreeMyXe,
 }
 
+
+internal static class BootstrapCapabilities
+{
+    internal static bool SupportsDefaultHomebrewLaunch(BootstrapOption option) =>
+        option is BootstrapOption.XeUnshackle or BootstrapOption.XeUnshackleMax;
+}
 
 internal enum ReleaseSelectionPolicy
 {

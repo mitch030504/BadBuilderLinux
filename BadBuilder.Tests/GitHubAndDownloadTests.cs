@@ -48,6 +48,36 @@ public sealed class GitHubAndDownloadTests
     }
 
     [Fact]
+    public void Catalog_XeUnshackleMax_PinsReleaseAndOmitsRemoteAccessPlugins()
+    {
+        ArtifactDefinition artifact = ArtifactCatalog.Bootstraps[BootstrapOption.XeUnshackleMax];
+        GitHubReleaseSource source = Assert.IsType<GitHubReleaseSource>(artifact.Source);
+
+        Assert.Equal("XeUnshackle Max", artifact.DisplayName);
+        Assert.Equal("klofi", source.Owner);
+        Assert.Equal("XeUnshackle-Max", source.Repo);
+        Assert.Equal("XeUnshackle-Max-v1.0.0.zip", source.AssetPattern);
+        Assert.Equal(ReleaseSelectionPolicy.ExactTag, source.ReleasePolicy);
+        Assert.Equal("v1.0.0", source.ReleaseTag);
+        Assert.Equal("838CF16450790601158265C22C84D90C1F9FFFF7BA07854B9781722DBA2328E4", source.PinnedSHA256);
+        Assert.True(artifact.Layout?.RequireSingleTopLevelDirectory);
+        Assert.Equal(2, artifact.Operations?.Count);
+        Assert.Equal("BadUpdatePayload", artifact.Operations![0].DestinationPath);
+        Assert.Equal("<SUBFOLDER>/BadUpdatePayload", artifact.Operations[0].SourcePath);
+        Assert.Contains("BadUpdatePayload/default.xex", artifact.Operations[0].AllowedOverwritePaths ?? []);
+        Assert.Equal("launch.ini", artifact.Operations[1].DestinationPath);
+        Assert.Equal("<SUBFOLDER>/launch.ini", artifact.Operations[1].SourcePath);
+    }
+
+    [Fact]
+    public void XeUnshackleVariantsSupportDefaultHomebrewLaunch()
+    {
+        Assert.True(BootstrapCapabilities.SupportsDefaultHomebrewLaunch(BootstrapOption.XeUnshackle));
+        Assert.True(BootstrapCapabilities.SupportsDefaultHomebrewLaunch(BootstrapOption.XeUnshackleMax));
+        Assert.False(BootstrapCapabilities.SupportsDefaultHomebrewLaunch(BootstrapOption.FreeMyXe));
+    }
+
+    [Fact]
     public void AssetSelection_RequiresExactlyOneGlobMatch()
     {
         GitHubAssetInfo zip = new("release.zip", "https://example/release.zip", 10, null);
