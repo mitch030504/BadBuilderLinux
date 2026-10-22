@@ -13,7 +13,7 @@ All downloads, archive extraction, and installation planning finish before BadBu
 
 On Linux, run the interactive application as your normal desktop user. BadBuilder invokes its own hidden disk helper through `sudo` only for preparation and cleanup. The helper independently re-enumerates the selected disk, verifies its fingerprint, takes a per-device lease, normally unmounts child volumes, creates an MBR with one `BADUPDATE` FAT32 partition, and mounts it below `/run/badbuilder/<uid>/<token>` with `nodev,nosuid,noexec` and caller ownership. It flushes and normally unmounts the USB when installation ends. It never uses force or lazy unmounting.
 
-On Windows, launch from an Administrator terminal. BadBuilder excludes the Windows system disk, accepts USB/removable media only, requires every volume lock and dismount to succeed, revalidates identity immediately before formatting, and waits for drive-letter reassignment after refreshing the partition table.
+On Windows, the published `win-x64` executable includes an administrator manifest and may show a UAC elevation prompt when launched normally; launching from an Administrator terminal also works. BadBuilder additionally checks its administrator privileges at runtime. It excludes the Windows system disk, accepts USB/removable media only, requires every volume lock and dismount to succeed, revalidates identity immediately before formatting, and waits for drive-letter reassignment after refreshing the partition table. The Linux executable has no elevation manifest.
 
 Ctrl+C cancels downloads, extraction, and other preflight work. Once the exact device-path confirmation has been accepted and formatting starts, cancellation is deferred until disk cleanup finishes.
 
