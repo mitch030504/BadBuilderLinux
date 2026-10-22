@@ -262,8 +262,8 @@ internal static partial class BuilderApp
 
         if (Config.LaunchHomebrew is null)
             return;
-        if (Config.SelectedBootstrap != BootstrapOption.XeUnshackle)
-            throw new InvalidOperationException("Automatic homebrew launch requires the XeUnshackle bootstrap.");
+        if (!BootstrapCapabilities.SupportsDefaultHomebrewLaunch(Config.SelectedBootstrap))
+            throw new InvalidOperationException("Automatic homebrew launch requires XeUnshackle or XeUnshackle Max.");
         if (string.IsNullOrWhiteSpace(Config.LaunchHomebrew.EntryPointRelativePath))
             throw new InvalidOperationException("The selected default homebrew has no valid entry point.");
     }

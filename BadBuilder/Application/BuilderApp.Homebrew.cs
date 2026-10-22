@@ -167,9 +167,9 @@ internal static partial class BuilderApp
 
     private static void ConfigureLaunchHomebrew()
     {
-        if (Config.SelectedBootstrap != BootstrapOption.XeUnshackle)
+        if (!BootstrapCapabilities.SupportsDefaultHomebrewLaunch(Config.SelectedBootstrap))
         {
-            Controls.WriteWarning("Automatic homebrew launch requires the XeUnshackle bootstrap.");
+            Controls.WriteWarning("Automatic homebrew launch requires XeUnshackle or XeUnshackle Max.");
             Controls.Pause();
             return;
         }

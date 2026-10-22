@@ -68,6 +68,34 @@ internal static class ArtifactCatalog
             ArtifactPriority.Bootstrap,
             Layout: new ArchiveLayout(RequireSingleTopLevelDirectory: true)
         ),
+        [BootstrapOption.XeUnshackleMax] = new
+        (
+            "bootstrap-xeunshackle-max",
+            "XeUnshackle Max",
+            "XeUnshackle fork with auto-start, key masking and configurable boot video (beta)",
+            "bootstrap",
+            new GitHubReleaseSource(
+                "klofi",
+                "XeUnshackle-Max",
+                "XeUnshackle-Max-v1.0.0.zip",
+                ReleaseSelectionPolicy.ExactTag,
+                "v1.0.0",
+                "838CF16450790601158265C22C84D90C1F9FFFF7BA07854B9781722DBA2328E4"),
+            [
+                // Network-access plugins included in the ZIP are not installed automatically.
+                new InstallOperation(
+                    InstallOperationKind.CopyDirectory,
+                    "BadUpdatePayload",
+                    "<SUBFOLDER>/BadUpdatePayload",
+                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"]),
+                new InstallOperation(
+                    InstallOperationKind.CopyFile,
+                    "launch.ini",
+                    "<SUBFOLDER>/launch.ini")
+            ],
+            ArtifactPriority.Bootstrap,
+            Layout: new ArchiveLayout(RequireSingleTopLevelDirectory: true)
+        ),
         [BootstrapOption.FreeMyXe] = new
         (
             "bootstrap-freemyxe",

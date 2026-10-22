@@ -38,6 +38,9 @@ jobs:
       - name: Audit dependencies
         run: dotnet list BadBuilder/BadBuilder.csproj package --vulnerable --include-transitive
 
+      - name: Verify pinned XeUnshackle Max release ZIP
+        if: runner.os == 'Linux'
+        run: python3 scripts/verify_xeunshackle_max_release.py
       - name: Warning-free build
         run: dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
 

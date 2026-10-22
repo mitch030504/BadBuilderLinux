@@ -34,7 +34,7 @@ Do not run `sudo ./BadBuilder`. Interactive root launches are refused.
 ## Using BadBuilder
 
 1. Open **Target drive** and choose the USB device. Fixed and protected disks are not shown.
-2. Select BadUpdate, ABadAvatar Public Beta, or the pinned ABadAvatar 1.3 Beta build, then choose a post-exploit bootstrap and any desired homebrew. Dashboard Update is a separate install mode for official `2.0.17559.0` update files.
+2. Select BadUpdate, ABadAvatar Public Beta, or the pinned ABadAvatar 1.3 Beta build, then choose XeUnshackle, XeUnshackle Max, or FreeMyXe as a post-exploit bootstrap and any desired homebrew. Dashboard Update is a separate install mode for official `2.0.17559.0` update files.
 3. Choose **Install**. BadBuilder resolves releases, verifies or explicitly approves hashes, extracts into a unique temporary run directory, validates layouts, and builds the complete copy plan.
 4. Review the displayed path, model, byte size, and serial/WWN. Type the exact device path to authorize formatting.
 5. Wait for the success message. Linux automatically flushes and unmounts the USB. Windows leaves its assigned drive letter in place for normal eject.
@@ -43,6 +43,16 @@ Expected disk, network, cache, and archive errors are shown as actionable messag
 
 > [!WARNING]
 > ABadAvatar 1.3 Beta is still a prerelease. Disconnect the Xbox 360 from both Ethernet and Wi-Fi before triggering it. Its release notes also warn that a connected Kinect can significantly reduce the exploit success rate.
+
+## XeUnshackle Max
+
+XeUnshackle Max is an additional post-exploit bootstrap choice alongside the original XeUnshackle and FreeMyXe. Its pinned source is [klofi/XeUnshackle-Max v1.0.0](https://github.com/klofi/XeUnshackle-Max/releases/tag/v1.0.0), an independent **beta** fork of Byrom90's XeUnshackle.
+
+The fork adds optional automatic startup, CPU/DVD-key masking, boot-video skipping and volume control, and custom boot-video playback. On the Xbox 360, pressing Start can create a XeUnshackleConfig.txt next to BadUpdatePayload/default.xex. See the [upstream configuration documentation](https://github.com/klofi/XeUnshackle-Max#features). Both XeUnshackle variants support default homebrew launching through launch.ini.
+
+BadBuilderLinux pins the exact v1.0.0 ZIP and its upstream-published SHA-256. It copies the BadUpdatePayload directory and launch.ini, intentionally **not** installing the bundled JRPC2/Xbdm remote-access binaries automatically. You can add those plugins manually after reviewing the security implications. The upstream launch.ini may reference plugins that are not present on the freshly formatted USB.
+
+The existing preflight and disk-identity checks remain mandatory. XeUnshackle Max is not a permanent softmod. Do not flash modified NAND images or overwrite files in the console's flash. Read the upstream warnings before use.
 
 ## Storage locations
 
@@ -96,6 +106,7 @@ If release metadata is unavailable and no valid cache exists, BadBuilder asks fo
 - Bibarub — [ABadAvatar 1.3 Beta](https://github.com/bibarub/Xbox360BadUpdate/releases/tag/avatar-v1.3-beta)
 - FreeMyXe Team / InvoxiPlayGames — [FreeMyXe](https://github.com/FreeMyXe/FreeMyXe)
 - Byrom90 — [XeUnshackle](https://github.com/Byrom90/XeUnshackle)
+- klofi — [XeUnshackle Max](https://github.com/klofi/XeUnshackle-Max)
 - Swizzy — Simple 360 NAND Flasher
 - Team XeDEV — XeXMenu
 - Phoenix — Aurora Dashboard

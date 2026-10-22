@@ -74,10 +74,10 @@ internal static partial class BuilderApp
 
         Config.SelectedBootstrap = selected.Value;
 
-        if (selected.Value != BootstrapOption.XeUnshackle && Config.LaunchHomebrew is not null)
+        if (!BootstrapCapabilities.SupportsDefaultHomebrewLaunch(selected.Value) && Config.LaunchHomebrew is not null)
         {
             Config.LaunchHomebrew = null;
-            Controls.WriteWarning("The default homebrew launch selection was cleared because automatic launching requires XeUnshackle.");
+            Controls.WriteWarning("The default homebrew launch selection was cleared because automatic launching requires XeUnshackle or XeUnshackle Max.");
             Controls.Pause();
         }
     }

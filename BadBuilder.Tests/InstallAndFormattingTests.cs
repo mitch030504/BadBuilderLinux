@@ -151,6 +151,40 @@ public sealed class InstallAndFormattingTests
     }
 
     [Fact]
+    public async Task XeUnshackleMax_OverlaysOnlyPayloadAndLaunchConfig()
+    {
+        using TemporaryDirectory temporary = new();
+        string exploitRoot = Path.Combine(temporary.Path, "exploit");
+        string maxRoot = Path.Combine(temporary.Path, "max");
+        string maxFolder = Path.Combine(maxRoot, "XeUnshackle-Max-v1.0.0");
+        string target = Path.Combine(temporary.Path, "target");
+        Directory.CreateDirectory(Path.Combine(exploitRoot, "BadUpdatePayload"));
+        Directory.CreateDirectory(Path.Combine(maxFolder, "BadUpdatePayload"));
+        Directory.CreateDirectory(target);
+
+        await File.WriteAllTextAsync(Path.Combine(exploitRoot, "BadUpdatePayload", "default.xex"), "exploit");
+        await File.WriteAllTextAsync(Path.Combine(maxFolder, "BadUpdatePayload", "default.xex"), "max");
+        await File.WriteAllTextAsync(Path.Combine(maxFolder, "BadUpdatePayload", "BadStorage.xex.dll"), "storage");
+        await File.WriteAllTextAsync(Path.Combine(maxFolder, "launch.ini"), "[Paths]");
+        await File.WriteAllTextAsync(Path.Combine(maxFolder, "JRPC2.xex"), "remote access");
+        await File.WriteAllTextAsync(Path.Combine(maxFolder, "Xbdm.xex"), "remote access");
+
+        ArtifactDefinition exploit = new(
+            "exploit", "Exploit", "Test", string.Empty, null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")]);
+        ArtifactDefinition max = ArtifactCatalog.Bootstraps[BootstrapOption.XeUnshackleMax];
+        InstallPlan plan = InstallService.BuildPlan(
+            [(exploit, exploitRoot), (max, maxRoot)], [], 128L * 1024 * 1024);
+        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+
+        Assert.Equal("max", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
+        Assert.Equal("storage", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "BadStorage.xex.dll")));
+        Assert.True(File.Exists(Path.Combine(target, "launch.ini")));
+        Assert.False(File.Exists(Path.Combine(target, "JRPC2.xex")));
+        Assert.False(File.Exists(Path.Combine(target, "Xbdm.xex")));
+    }
+
+    [Fact]
     public void FormatterSizePolicy_StaysWithinGuaranteedFat32Range()
     {
         Assert.False(DiskFormatter.IsSupportedDiskSize(DiskFormatter.MinimumDiskSize - 1));
