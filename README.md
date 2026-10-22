@@ -80,6 +80,10 @@ Two destructive tests are opt-in and never run in normal CI:
 
 Set `BADBUILDER_LIVE_SMOKE=1` to resolve all upstream catalog sources without downloading an asset or touching a disk.
 
+## Publishing a release
+
+Releases are published by GitHub Actions after the VersionPrefix in BadBuilder/BadBuilder.csproj is increased on main. Add the corresponding release notes at .github/release-notes/vX.Y.Z.md before merging. The release.yml workflow builds and tests both supported x64 platforms, verifies the version strings and native binary formats, generates SHA-256 checksums, then creates the matching version tag and GitHub release. An already-published version is skipped. To retry a failed release, rerun the workflow from GitHub Actions.
+
 ## Offline archives
 
 If release metadata is unavailable and no valid cache exists, BadBuilder asks for a local archive for every configured artifact. No configured built-in homebrew is silently skipped. Local files go through the same checksum, approval, extraction, layout, and preflight checks as downloads.

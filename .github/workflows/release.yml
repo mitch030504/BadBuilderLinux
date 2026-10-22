@@ -1,0 +1,150 @@
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - BadBuilder/BadBuilder.csproj
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: badbuilder-release-main
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      needed: ${{ steps.version.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Determine next release
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^[[:space:]]*<VersionPrefix>\([^<]*\)<\/VersionPrefix>.*/\1/p' BadBuilder/BadBuilder.csproj)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Unexpected VersionPrefix: $version" >&2
+            exit 1
+          fi
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag already exists; no publication needed."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            test -f ".github/release-notes/$tag.md" || { echo "Missing release notes for $tag" >&2; exit 1; }
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.needed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            binary: BadBuilder
+          - os: windows-latest
+            rid: win-x64
+            binary: BadBuilder.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+      - name: Restore
+        run: dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj
+      - name: Audit dependencies
+        run: dotnet list BadBuilder/BadBuilder.csproj package --vulnerable --include-transitive
+      - name: Build with warnings as errors
+        run: dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
+      - name: Run unit tests
+        run: dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-build --no-restore
+      - name: Publish self-contained executable
+        run: dotnet publish BadBuilder/BadBuilder.csproj -c Release -r ${{ matrix.rid }} --self-contained true --no-restore -o dist
+      - name: Validate Linux executable version
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(./dist/BadBuilder --version)"
+          [[ "$actual" == "${{ needs.prepare.outputs.version }}"* ]] || { echo "Unexpected version: $actual"; exit 1; }
+          file dist/BadBuilder | grep -q ELF
+      - name: Validate Windows executable version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $actual = (./dist/BadBuilder.exe --version).Trim()
+          if (-not $actual.StartsWith('${{ needs.prepare.outputs.version }}')) {
+            throw "Unexpected version: $actual"
+          }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path ./dist/BadBuilder.exe))
+          if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) {
+            throw "Windows executable is missing the MZ header"
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.rid }}
+          path: dist/${{ matrix.binary }}
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-linux-x64
+          path: release/linux
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-win-x64
+          path: release/windows
+      - name: Assemble verified release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv release/linux/BadBuilder release/BadBuilder-linux-x64
+          mv release/windows/BadBuilder.exe release/BadBuilder-win-x64.exe
+          chmod +x release/BadBuilder-linux-x64
+          file release/BadBuilder-linux-x64 | grep -q ELF
+          file release/BadBuilder-win-x64.exe | grep -q PE32
+          cd release
+          sha256sum BadBuilder-linux-x64 BadBuilder-win-x64.exe > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            release/BadBuilder-linux-x64 \
+            release/BadBuilder-win-x64.exe \
+            release/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "BadBuilderLinux $TAG" \
+            --notes-file ".github/release-notes/$TAG.md"
