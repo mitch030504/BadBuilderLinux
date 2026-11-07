@@ -16,8 +16,58 @@ internal static class DiskFormatter
     // DiscUtils' partition formatter accepts a signed 32-bit sector count.
     internal const long MaximumDiskSize = (long)int.MaxValue * 512;
 
+    internal readonly record struct Fat32Layout(
+        int Heads,
+        int Cylinders,
+        long SectorCount,
+        int SectorsPerCluster,
+        int ClusterSize,
+        uint FatSizeSectors,
+        long DataSectors,
+        long TotalDataClusters);
+
     internal static bool IsSupportedDiskSize(long diskSize) =>
         diskSize >= MinimumDiskSize && diskSize <= MaximumDiskSize;
+
+    // Mirrors the geometry and FAT sizing that DiscUtils 1.0.89 uses when
+    // BiosPartitionTable.Initialize and FatFileSystem.FormatPartition create the
+    // single MBR partition formatted by FormatFat32.
+    internal static bool TryGetFat32Layout(long diskSize, out Fat32Layout layout)
+    {
+        layout = default;
+        if (!IsSupportedDiskSize(diskSize))
+            return false;
+
+        int heads = diskSize <= 528482304 ? 16
+            : diskSize <= 1056964608 ? 32
+            : diskSize <= 2113929216 ? 64
+            : diskSize > 4227858432 ? 255
+            : 128;
+        long cylinders = Math.Min(1024L, diskSize / (63L * heads * 512L));
+        long sectorCount = 63L * (cylinders * heads - 1);
+
+        int sectorsPerCluster = sectorCount <= 532480 ? 1
+            : sectorCount <= 16777216 ? 8
+            : sectorCount <= 33554432 ? 16
+            : sectorCount > 67108864 ? 64
+            : 32;
+
+        // DiscUtils.CalcFatSize for FAT32: one 32-bit entry per data cluster.
+        uint fatSizeSectors = (uint)((sectorCount / sectorsPerCluster * 32u / 8u + 511u) / 512u);
+        long dataSectors = sectorCount - 32 - 2L * fatSizeSectors;
+        long totalDataClusters = dataSectors / sectorsPerCluster;
+
+        layout = new Fat32Layout(
+            heads,
+            (int)cylinders,
+            sectorCount,
+            sectorsPerCluster,
+            sectorsPerCluster * 512,
+            fatSizeSectors,
+            dataSectors,
+            totalDataClusters);
+        return true;
+    }
 
     internal static void FormatFat32(Stream stream, long diskSize)
     {
