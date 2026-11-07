@@ -16,6 +16,53 @@ internal static partial class LinuxNative
     [DllImport("libc", EntryPoint = "getgid")]
     internal static extern uint GetGroupId();
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PasswdEntry
+    {
+        public IntPtr Name;
+        public IntPtr Password;
+        public uint UserId;
+        public uint GroupId;
+        public IntPtr Gecos;
+        public IntPtr Directory;
+        public IntPtr Shell;
+    }
+
+    [DllImport("libc", EntryPoint = "getpwuid_r")]
+    private static extern int GetPasswordEntryNative(uint uid, IntPtr passwd, IntPtr buffer, IntPtr bufferLength, out IntPtr result);
+
+    internal static string? TryGetHomeDirectory(uint uid)
+    {
+        const int rangeError = 34;
+        int bufferSize = 4096;
+        while (bufferSize <= 1 << 20)
+        {
+            IntPtr buffer = Marshal.AllocHGlobal(bufferSize);
+            IntPtr passwd = Marshal.AllocHGlobal(Marshal.SizeOf<PasswdEntry>());
+            try
+            {
+                int status = GetPasswordEntryNative(uid, passwd, buffer, (IntPtr)bufferSize, out IntPtr entry);
+                if (status == rangeError)
+                {
+                    bufferSize *= 2;
+                    continue;
+                }
+                if (status != 0 || entry == IntPtr.Zero)
+                    return null;
+
+                PasswdEntry data = Marshal.PtrToStructure<PasswdEntry>(entry);
+                return data.Directory == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(data.Directory);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(passwd);
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        return null;
+    }
+
     [LibraryImport("libc", EntryPoint = "chown", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int ChangeOwnerNative(string path, uint owner, uint group);
 
@@ -182,12 +229,7 @@ internal sealed class LinuxDiskBackend : IDiskBackend
         return response;
     }
 
-    private static IEnumerable<string> GetProtectedPaths()
-    {
-        yield return AppPaths.WorkspaceRoot;
-        yield return AppPaths.CacheRoot;
-        yield return AppContext.BaseDirectory;
-    }
+    private static IReadOnlyList<string> GetProtectedPaths() => LinuxProtectedPaths.ForApplication();
 
     private static void EnsureLinux()
     {

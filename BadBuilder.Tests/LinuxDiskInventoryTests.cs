@@ -76,6 +76,93 @@ public sealed class LinuxDiskInventoryTests
     }
 
     [Fact]
+    public void Parse_ExcludesSeparatelyMountedHomeDirectory()
+    {
+        const string home = "/home/alice";
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            BuildLsblk(home),
+            BuildFindmnt("/dev/sdb1", home),
+            "Filename Type Size Used Priority\n",
+            [home]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_ExcludesSeparatelyMountedHomeDirectoryFromLsblkFallback()
+    {
+        const string home = "/home/alice";
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            BuildLsblk(home),
+            "{\"filesystems\":[{\"source\":\"unmapped-root\",\"target\":\"/\"}]}",
+            "Filename Type Size Used Priority\n",
+            [home]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_ExcludesDiskBackingSymlinkedCacheDirectory()
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        string root = Path.Combine(Path.GetTempPath(), $"badbuilder-protection-{Guid.NewGuid():N}");
+        string realMount = Path.Combine(root, "real");
+        string cacheLink = Path.Combine(root, "cache");
+        Directory.CreateDirectory(realMount);
+        try
+        {
+            Directory.CreateSymbolicLink(cacheLink, realMount);
+
+            LinuxInventory inventory = LinuxDiskInventory.Parse(
+                BuildLsblk(realMount),
+                BuildFindmnt("/dev/sdb1", realMount),
+                "Filename Type Size Used Priority\n",
+                [cacheLink]);
+
+            Assert.Empty(inventory.EligibleDisks);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Parse_KeepsOrdinaryUsbOutsideProtectedPathsEligible()
+    {
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            BuildLsblk("/media/usb"),
+            BuildFindmnt("/dev/sdb1", "/media/usb"),
+            "Filename Type Size Used Priority\n",
+            ["/workspace", "/home/alice"]);
+
+        DiskInfo disk = Assert.Single(inventory.EligibleDisks);
+        Assert.Equal("/dev/sdb", disk.DevicePath);
+    }
+
+    [Fact]
+    public void UserHome_ParsesCallerHomeFromPasswdFixture()
+    {
+        const string passwd =
+            """
+            root:x:0:0:root:/root:/bin/bash
+            alice:x:1000:1000:Alice:/home/alice:/bin/bash
+            bob:x:1001:1001:Bob:/srv/bob:/bin/sh
+            nohome:x:1002:1002:No Home::/bin/false
+            malformed line
+            """;
+
+        Assert.Equal("/home/alice", LinuxUserHome.ParsePasswdHome(passwd, 1000));
+        Assert.Equal("/srv/bob", LinuxUserHome.ParsePasswdHome(passwd, 1001));
+        Assert.Null(LinuxUserHome.ParsePasswdHome(passwd, 1002));
+        Assert.Null(LinuxUserHome.ParsePasswdHome(passwd, 4242));
+    }
+
+    [Fact]
     public void Identity_FingerprintIsStableButExactMatchRejectsChangedPath()
     {
         DiskIdentity original = DiskIdentity.Create("/dev/sdb", "USB", "SERIAL", null, 1_000_000, "usb");
@@ -120,4 +207,20 @@ public sealed class LinuxDiskInventoryTests
             "--uid", "1000", "--gid", "1000", "--token", new string('b', 32),
             "--workspace", "/work", "--cache", "/cache", "--force", "true"]));
     }
+
+    private static string BuildLsblk(string mountPoint) =>
+        $$"""
+        {
+          "blockdevices": [
+            {
+              "name":"/dev/sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":2000000000,
+              "model":"Safe USB","serial":"SAFE","tran":"usb","rm":true,"hotplug":true,"ro":false,
+              "children":[{"name":"/dev/sdb1","kname":"sdb1","path":"/dev/sdb1","pkname":"sdb","type":"part","size":1900000000,"fstype":"vfat","mountpoints":["{{mountPoint}}"]}]
+            }
+          ]
+        }
+        """;
+
+    private static string BuildFindmnt(string source, string target) =>
+        $$"""{"filesystems":[{"source":"{{source}}","target":"{{target}}"}]}""";
 }
