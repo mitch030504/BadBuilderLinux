@@ -141,7 +141,7 @@ internal static class ArtifactCatalog
                     InstallOperationKind.RenameFile,
                     "BadUpdatePayload/default.xex",
                     "BadUpdatePayload/FreeMyXe.xex",
-                    AllowedOverwritePaths: ["BadUpdatePayload/default.xex"])
+                    OptionalOverwritePaths: ["BadUpdatePayload/default.xex"])
             ],
             ArtifactPriority.Bootstrap,
             Layout: new ArchiveLayout(["FreeMyXe.xex"])
