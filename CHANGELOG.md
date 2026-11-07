@@ -6,7 +6,7 @@
 
 - Linux disk inventory now protects the caller's actual home directory and resolves symlinked workspace/cache paths to their backing mounts. The privileged helper resolves home from the caller UID instead of root's environment.
 - Windows drive-letter discovery revalidates the selected disk identity after formatting and accepts only one FAT32 `BADUPDATE` volume, so a replacement device reusing the same disk index cannot become the copy target.
-- Install preflight rejects planned files larger than `uint.MaxValue` and estimates FAT32 cluster/directory allocation, including empty directories, using the formatter's actual layout. The estimate is correct across 1–32 GiB targets.
+- Install preflight rejects planned files larger than `uint.MaxValue` and estimates FAT32 cluster/directory allocation, including empty directories, using the formatter's actual layout. The estimate is correct across 1–16 GiB targets.
 - FreeMyXe now installs with the original ABadAvatar archive when it has no existing `BadUpdatePayload/default.xex`.
 - Peer Pressure validates complete HDD destinations and every copied entry against FATX limits (42-character names and 240-character paths).
 - Automatic homebrew launch validates the selected executable and updates `launch.ini` in staging before the installation plan is built. Malformed UTF-16 fails before disk erasure.
@@ -17,7 +17,7 @@
 
 ### Validation
 
-- 136 tests pass, including new regressions for 4 GiB files, FAT32 allocation from 1–32 GiB, symlinked protected paths, FATX limits, launch.ini preflight, download fallback/timeouts, and pending cleanup storage.
+- 135 tests pass, including new regressions for 4 GiB files, FAT32 allocation from 1–16 GiB, symlinked protected paths, FATX limits, launch.ini preflight, download fallback/timeouts, and pending cleanup storage.
 - Linux and Windows x64 self-contained single-file publishes succeed; the Linux binary passes `--version`.
 - The pinned XeUnshackle Max archive check passes; NuGet reports no known vulnerable dependencies.
 

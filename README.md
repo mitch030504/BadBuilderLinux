@@ -106,7 +106,7 @@ dotnet publish BadBuilder/BadBuilder.csproj -c Release -r linux-x64 --self-conta
 dotnet publish BadBuilder/BadBuilder.csproj -c Release -r win-x64 --self-contained true --no-restore
 ```
 
-Nullable, platform, and analyzer warnings fail the build. The 136-test suite covers disk inventory and identity, symlinked protected paths, downloads and cache integrity, timeout and local-archive fallback, archive limits and paths, install planning, FAT32 allocation against disposable images from 1 to 32 GiB, launch.ini preflight, pending-cleanup recovery, and Peer Pressure extras, FATX limits, default-dashboard paths, and catalog injection checks.
+Nullable, platform, and analyzer warnings fail the build. The 135-test suite covers disk inventory and identity, symlinked protected paths, downloads and cache integrity, timeout and local-archive fallback, archive limits and paths, install planning, FAT32 allocation against disposable images from 1 to 16 GiB, launch.ini preflight, pending-cleanup recovery, and Peer Pressure extras, FATX limits, default-dashboard paths, and catalog injection checks.
 
 Optional checks:
 

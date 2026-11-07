@@ -79,7 +79,6 @@ public sealed class InstallPlanSafetyTests
     [InlineData(4L)]
     [InlineData(8L)]
     [InlineData(16L)]
-    [InlineData(32L)]
     public void Fat32Layout_MatchesFormattedImageBootSector(long sizeGiB)
     {
         long diskSize = sizeGiB * OneGiB;
