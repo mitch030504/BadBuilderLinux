@@ -1,9 +1,118 @@
 using System.Text;
+using BadBuilder.Configuration;
 
 namespace BadBuilder.Services;
 
 internal static class LaunchIniService
 {
+    private static readonly StringComparer StagedPathComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    internal static void ValidateStagedEntryPoint(
+        IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> staged,
+        HomebrewEntry launchHomebrew)
+    {
+        string artifactId = launchHomebrew.Artifact.ID;
+        int stagedIndex = FindStagedIndex(staged, artifactId);
+        if (stagedIndex < 0)
+            throw new InvalidOperationException($"The selected homebrew artifact was not staged: {artifactId}");
+
+        (ArtifactDefinition artifact, string stagingPath) = staged[stagedIndex];
+        InstallOperation? copyOperation = null;
+        foreach (InstallOperation operation in artifact.Operations ?? [])
+        {
+            if (operation.Kind != InstallOperationKind.CopyDirectory)
+                continue;
+            if (copyOperation is not null)
+                throw new InvalidDataException($"{artifact.DisplayName} has more than one directory installation operation.");
+            copyOperation = operation;
+        }
+
+        if (copyOperation is null)
+            throw new InvalidDataException($"{artifact.DisplayName} does not install a homebrew directory.");
+
+        string source = InstallService.ResolveStagedSource(stagingPath, copyOperation);
+        if (!Directory.Exists(source))
+            throw new DirectoryNotFoundException($"Expected staged directory was not found: {source}");
+
+        if (string.IsNullOrWhiteSpace(launchHomebrew.EntryPointRelativePath))
+            throw new InvalidOperationException("The selected default homebrew has no valid entry point.");
+
+        string entryPoint = PathSafety.NormalizeRelativePath(launchHomebrew.EntryPointRelativePath);
+        FileServices.ValidateFatRelativePath(entryPoint);
+        FileServices.EnsureFile(PathSafety.ResolveInside(source, entryPoint));
+        FileServices.ValidateFatRelativePath($"{copyOperation.DestinationPath}/{entryPoint}");
+    }
+
+    internal static string? FindStagedLaunchIni(
+        IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> staged,
+        string bootstrapArtifactId)
+    {
+        int stagedIndex = FindStagedIndex(staged, bootstrapArtifactId);
+        if (stagedIndex < 0)
+            return null;
+
+        (ArtifactDefinition bootstrap, string stagingPath) = staged[stagedIndex];
+        HashSet<string> candidates = new(StagedPathComparer);
+        foreach (InstallOperation operation in bootstrap.Operations ?? [])
+        {
+            if (operation.Kind == InstallOperationKind.CopyFile &&
+                PathSafety.NormalizeRelativePath(operation.DestinationPath)
+                    .Equals("launch.ini", StringComparison.OrdinalIgnoreCase))
+            {
+                string source = InstallService.ResolveStagedSource(stagingPath, operation);
+                if (File.Exists(source))
+                    candidates.Add(Path.GetFullPath(source));
+            }
+            else if (operation.Kind == InstallOperationKind.CopyDirectory &&
+                     PathSafety.NormalizeRelativePath(operation.DestinationPath) == ".")
+            {
+                string source = InstallService.ResolveStagedSource(stagingPath, operation);
+                string candidate = Path.Combine(source, "launch.ini");
+                if (File.Exists(candidate))
+                    candidates.Add(Path.GetFullPath(candidate));
+            }
+        }
+
+        if (candidates.Count > 1)
+        {
+            throw new InvalidDataException(
+                $"Multiple staged launch.ini candidates were found for {bootstrap.DisplayName}: " +
+                string.Join(", ", candidates));
+        }
+
+        return candidates.Count == 1 ? candidates.First() : null;
+    }
+
+    private static int FindStagedIndex(
+        IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> staged,
+        string artifactId)
+    {
+        for (int index = 0; index < staged.Count; index++)
+        {
+            if (staged[index].Artifact.ID == artifactId)
+                return index;
+        }
+
+        return -1;
+    }
+
+    internal static async Task<bool> ConfigureStagedLaunchAsync(
+        IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> staged,
+        string bootstrapArtifactId,
+        HomebrewEntry launchHomebrew,
+        string defaultXboxPath,
+        CancellationToken cancellationToken)
+    {
+        ValidateStagedEntryPoint(staged, launchHomebrew);
+
+        string? iniPath = FindStagedLaunchIni(staged, bootstrapArtifactId);
+        if (iniPath is null)
+            return false;
+
+        return await UpdateDefaultAsync(iniPath, defaultXboxPath, cancellationToken);
+    }
+
     internal static async Task<bool> UpdateDefaultAsync(
         string path,
         string defaultXboxPath,
