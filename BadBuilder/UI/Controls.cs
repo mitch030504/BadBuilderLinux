@@ -159,6 +159,13 @@ internal static class Controls
         {
             table.AddRow("Update", "[gray]Update to 2.0.17559.0[/]");
         }
+        else if (config.IsPeerPressureInstall)
+        {
+            table.AddRow("Exploit", "[gray]Peer Pressure[/]");
+            table.AddRow("USB contents", "[gray]Official softmod installer + Rock Band Blitz demo (includes XeLL)[/]");
+            table.AddRow("Installer extras", Escape(string.Join(", ", config.Homebrew.Select(entry => entry.Artifact.DisplayName).DefaultIfEmpty("None"))));
+            table.AddRow("Default dashboard", Escape(config.LaunchHomebrew?.Artifact.DisplayName ?? "None"));
+        }
         else
         {
             table.AddRow("Exploit", $"[gray]{Escape(config.SelectedExploit.ToString())}[/]");

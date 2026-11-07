@@ -5,6 +5,7 @@ internal enum ExploitOption
     ABadAvatar,
     ABadAvatar13Beta,
     BadUpdate,
+    PeerPressure,
 }
 
 internal enum BootstrapOption

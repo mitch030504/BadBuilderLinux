@@ -33,6 +33,10 @@ internal static partial class BuilderApp
                 options.RemoveAll(item => item.Value is not
                     (RootAction.ConfigureDrive or RootAction.UpdateXbox or RootAction.Install or RootAction.Exit));
             }
+            else if (Config.IsPeerPressureInstall)
+            {
+                options.RemoveAll(item => item.Value == RootAction.ConfigureBootstrap);
+            }
 
             try
             {
@@ -89,6 +93,12 @@ internal static partial class BuilderApp
         try
         {
             ValidateConfiguration();
+            if (Config.IsPeerPressureInstall)
+            {
+                Controls.WriteWarning("Peer Pressure requires a supported Xbox 360 and an HDD (mechanical recommended). Corona and Winchester are unsupported.");
+                Controls.WriteWarning("The console installer modifies NAND and HDD security sectors. Create and keep a system backup before installing; failure may require a hardware NAND flasher.");
+                Controls.WriteInfo("This prepares the official installer USB. Follow https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Installation");
+            }
             DiskInfo selected = Config.TargetDisk!;
             IReadOnlyList<ArtifactDefinition> artifacts = ArtifactCatalog.GetSelectedArtifacts(Config);
             if (artifacts.Count == 0)
@@ -121,6 +131,9 @@ internal static partial class BuilderApp
                 ArchiveService.ValidateLayout(artifact, path);
                 staged.Add((artifact, path));
             }
+
+            if (Config.IsPeerPressureInstall)
+                staged = PeerPressureHomebrewService.PrepareArtifacts(Config, staged);
 
             string configText = $"Configuration:{Environment.NewLine}{Config}";
             List<InstallOperation> extraOperations =
@@ -162,7 +175,7 @@ internal static partial class BuilderApp
             Controls.WriteInfo("Copying the fully validated installation plan.");
             await InstallService.ExecuteAsync(installPlan, preparedTarget.MountRoot, CancellationToken.None);
 
-            if (Config.LaunchHomebrew is not null)
+            if (!Config.FirmwareUpdateEnabled && !Config.IsPeerPressureInstall && Config.LaunchHomebrew is not null)
             {
                 string iniPath = Path.Combine(preparedTarget.MountRoot, "launch.ini");
                 string appName = FileServices.SanitizeFatName(Config.LaunchHomebrew.Artifact.DisplayName);
@@ -244,6 +257,8 @@ internal static partial class BuilderApp
                     ? "Your USB drive is ready for use and was safely unmounted."
                     : "Your USB drive is ready for use. Eject it normally from Windows."
                 : "All files were copied, but review the cleanup warning before removing the USB.");
+            if (Config.IsPeerPressureInstall)
+                Controls.WriteInfo("On the Xbox 360, launch the Rock Band Blitz demo and press A at the title screen. Create and keep a system backup. Select Install Extras and choose the packaged homebrew, including your selected default dashboard.");
             Controls.Pause();
         }
         else if (failureNeedsPause)
@@ -257,7 +272,7 @@ internal static partial class BuilderApp
         if (Config.TargetDisk is null)
             throw new InvalidOperationException("Select a target drive.");
 
-        if (Config.FirmwareUpdateEnabled)
+        if (Config.FirmwareUpdateEnabled || Config.IsPeerPressureInstall)
             return;
 
         if (Config.LaunchHomebrew is null)
