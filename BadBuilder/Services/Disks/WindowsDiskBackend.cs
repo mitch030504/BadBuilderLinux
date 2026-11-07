@@ -106,7 +106,7 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
                 volumeLock.Dispose();
         }
 
-        string mountRoot = await RefreshAndFindDriveLetterAsync(diskIndex, cancellationToken);
+        string mountRoot = await RefreshAndFindDriveLetterAsync(current.Identity, cancellationToken);
         return new PreparedTarget(mountRoot, current.Identity, "windows", string.Empty, RequiresFinalize: false);
     }
 
@@ -116,10 +116,13 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
         return Task.FromResult(new FinalizeResult(Success: true));
     }
 
-    private static async Task<string> RefreshAndFindDriveLetterAsync(int diskIndex, CancellationToken cancellationToken)
+    private async Task<string> RefreshAndFindDriveLetterAsync(DiskIdentity expected, CancellationToken cancellationToken)
     {
+        DiskInfo revalidated = await RevalidateAsync(expected, cancellationToken);
+        int diskIndex = ParseDiskIndex(revalidated.DevicePath);
+
         using (SafeFileHandle handle = CreateFile(
-            $@"\\.\PhysicalDrive{diskIndex}",
+            revalidated.DevicePath,
             GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             IntPtr.Zero,
@@ -128,21 +131,71 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
             IntPtr.Zero))
         {
             if (handle.IsInvalid)
-                throw Win32IOException($"Could not refresh PhysicalDrive{diskIndex}");
+                throw Win32IOException($"Could not refresh {revalidated.DevicePath}");
             if (!DeviceIoControl(handle, IOCTL_DISK_UPDATE_PROPERTIES, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
-                throw Win32IOException($"Could not refresh the partition table for PhysicalDrive{diskIndex}");
+                throw Win32IOException($"Could not refresh the partition table for {revalidated.DevicePath}");
         }
 
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            string? driveLetter = EnumerateDriveLetters(diskIndex).FirstOrDefault();
-            if (driveLetter is not null)
-                return driveLetter + Path.DirectorySeparatorChar;
+            // Revalidate on every attempt so a replacement device which reuses the
+            // formatted disk's index can never become the copy destination.
+            DiskInfo current = await RevalidateAsync(expected, cancellationToken);
+            int currentIndex = ParseDiskIndex(current.DevicePath);
+            string? driveRoot = SelectPreparedDriveLetter(GetVolumes(currentIndex));
+            if (driveRoot is not null)
+                return driveRoot;
 
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
-        throw new IOException($"PhysicalDrive{diskIndex} was formatted, but Windows did not assign it a drive letter.");
+        throw new IOException(
+            $"PhysicalDrive{diskIndex} was formatted, but Windows did not expose exactly one FAT32 BADUPDATE volume with a drive letter.");
+    }
+
+    internal static string? SelectPreparedDriveLetter(IReadOnlyList<VolumeInfo> volumes)
+    {
+        ArgumentNullException.ThrowIfNull(volumes);
+
+        if (volumes.Count == 0)
+            return null;
+        if (volumes.Count > 1)
+            throw new DiskSafetyException(
+                $"The formatted disk exposes {volumes.Count} partitions; exactly one FAT32 BADUPDATE volume is required.");
+
+        VolumeInfo volume = volumes[0];
+
+        // WMI can lag behind the formatter, so only reject filesystem and label
+        // values which Windows actually reports.
+        string? fileSystem = volume.FileSystem?.Trim();
+        if (!string.IsNullOrEmpty(fileSystem) &&
+            !fileSystem.Equals("FAT32", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DiskSafetyException(
+                $"The formatted volume reports filesystem '{fileSystem}' instead of FAT32.");
+        }
+
+        string? label = volume.Label?.Trim();
+        if (!string.IsNullOrEmpty(label) &&
+            !label.Equals("BADUPDATE", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new DiskSafetyException(
+                $"The formatted volume reports label '{label}' instead of BADUPDATE.");
+        }
+
+        List<string> driveRoots = [];
+        foreach (string mountPoint in volume.MountPoints)
+        {
+            string trimmed = mountPoint.TrimEnd('\\', '/');
+            if (trimmed.Length == 2 && char.IsAsciiLetter(trimmed[0]) && trimmed[1] == ':')
+                driveRoots.Add($"{char.ToUpperInvariant(trimmed[0])}:\\");
+        }
+
+        if (volume.MountPoints.Count > 1)
+            throw new DiskSafetyException(
+                $"The formatted volume exposes {volume.MountPoints.Count} mount points; exactly one drive letter is required.");
+
+        return driveRoots.Count == 1 ? driveRoots[0] : null;
     }
 
     private static HashSet<int> GetSystemDiskIndices()
@@ -256,7 +309,7 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
     private static IEnumerable<string> EnumerateDriveLetters(int diskIndex) =>
         GetVolumes(diskIndex).SelectMany(volume => volume.MountPoints).Select(path => path.TrimEnd(Path.DirectorySeparatorChar));
 
-    private static int ParseDiskIndex(string devicePath)
+    internal static int ParseDiskIndex(string devicePath)
     {
         const string marker = "PhysicalDrive";
         int markerIndex = devicePath.LastIndexOf(marker, StringComparison.OrdinalIgnoreCase);
