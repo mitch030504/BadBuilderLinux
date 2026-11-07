@@ -6,6 +6,7 @@ internal static class AppPaths
     internal static string DownloadRoot => Path.Combine(CacheRoot, "downloads");
     internal static string LogRoot => Path.Combine(CacheRoot, "logs");
     internal static string WorkspaceRoot => Path.GetFullPath(Directory.GetCurrentDirectory());
+    internal static string HomeRoot { get; } = GetHomeRoot();
 
     internal static string CreateRunRoot() =>
         Directory.CreateTempSubdirectory("BadBuilder-run-").FullName;
@@ -29,6 +30,12 @@ internal static class AppPaths
         }
         if (Directory.Exists(fullRunRoot))
             Directory.Delete(fullRunRoot, recursive: true);
+    }
+
+    private static string GetHomeRoot()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(home) ? Path.DirectorySeparatorChar.ToString() : home);
     }
 
     private static string GetCacheRoot()

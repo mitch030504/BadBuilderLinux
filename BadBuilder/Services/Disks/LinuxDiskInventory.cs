@@ -51,9 +51,9 @@ internal static class LinuxDiskInventory
         {
             foreach (string mountPoint in node.MountPoints)
             {
-                string target;
-                try { target = Path.GetFullPath(mountPoint); }
-                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+                string? target = LinuxProtectedPaths.TryResolveRealPath(mountPoint);
+                if (target is null)
+                    continue;
                 if (protectedPathSet.Any(protectedPath => IsAtOrBelow(protectedPath, target)))
                     protectedDisks.Add(GetWholeDisk(node));
             }
@@ -217,14 +217,9 @@ internal static class LinuxDiskInventory
 
     private static HashSet<string> BuildProtectedPaths(IEnumerable<string> protectedPaths)
     {
-        HashSet<string> paths = [..protectedPaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)];
-        paths.Add(Path.GetFullPath("/"));
-        paths.Add(Path.GetFullPath("/boot"));
-        paths.Add(Path.GetFullPath("/boot/efi"));
-        paths.Add(Path.GetFullPath("/home"));
-        return paths;
+        return new HashSet<string>(
+            LinuxProtectedPaths.Resolve(protectedPaths.Concat(["/", "/boot", "/boot/efi", "/home"])),
+            StringComparer.Ordinal);
     }
 
     private static List<string> GetProtectedMountSources(string json, IReadOnlySet<string> protectedPaths)
@@ -238,9 +233,9 @@ internal static class LinuxDiskInventory
 
             foreach ((string Source, string Target) mount in FlattenFindmnt(fileSystems))
             {
-                string target;
-                try { target = Path.GetFullPath(mount.Target); }
-                catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+                string? target = LinuxProtectedPaths.TryResolveRealPath(mount.Target);
+                if (target is null)
+                    continue;
 
                 if (protectedPaths.Any(protectedPath => IsAtOrBelow(protectedPath, target)))
                     sources.Add(mount.Source);

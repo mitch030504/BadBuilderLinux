@@ -244,8 +244,11 @@ internal static class LinuxDiskHelper
 
     private static async Task<DiskInfo> RevalidateAsync(HelperRequest request, CancellationToken cancellationToken)
     {
-        LinuxInventory inventory = await LinuxDiskEnumerator.ReadAsync(
-            [request.Workspace, request.Cache, AppContext.BaseDirectory], cancellationToken);
+        IReadOnlyList<string> protectedPaths = LinuxProtectedPaths.ForHelper(
+            request.Uid,
+            request.Workspace,
+            request.Cache);
+        LinuxInventory inventory = await LinuxDiskEnumerator.ReadAsync(protectedPaths, cancellationToken);
         DiskInfo? disk = inventory.EligibleDisks.FirstOrDefault(candidate =>
             string.Equals(candidate.DevicePath, request.Device, StringComparison.Ordinal));
 
@@ -278,10 +281,13 @@ internal static class LinuxDiskHelper
 
     private static async Task<string> WaitForSinglePartitionAsync(HelperRequest request, CancellationToken cancellationToken)
     {
+        IReadOnlyList<string> protectedPaths = LinuxProtectedPaths.ForHelper(
+            request.Uid,
+            request.Workspace,
+            request.Cache);
         for (int attempt = 0; attempt < 40; attempt++)
         {
-            LinuxInventory inventory = await LinuxDiskEnumerator.ReadAsync(
-                [request.Workspace, request.Cache, AppContext.BaseDirectory], cancellationToken);
+            LinuxInventory inventory = await LinuxDiskEnumerator.ReadAsync(protectedPaths, cancellationToken);
             DiskInfo? verifiedDisk = inventory.EligibleDisks.FirstOrDefault(candidate =>
                 string.Equals(candidate.DevicePath, request.Device, StringComparison.Ordinal));
             if (verifiedDisk is null ||
