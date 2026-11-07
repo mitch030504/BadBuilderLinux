@@ -1,5 +1,6 @@
 using System.Text;
 using BadBuilder.Configuration;
+using BadBuilder.Services.Disks;
 
 namespace BadBuilder.Services;
 
@@ -43,17 +44,45 @@ internal static class InstallService
         foreach (InstallOperation operation in extraOperations)
             PlanOperation(operation, string.Empty, actions, destinationFiles, allowOverwrite: true);
 
-        ValidateDestinationShape(actions);
-
-        long required = destinationFiles.Values.Aggregate(0L, checked((total, size) => total + size));
-        long overhead = Math.Max(16L * 1024 * 1024, required / 20);
-        if (checked(required + overhead) > targetCapacityBytes)
+        foreach ((string path, long size) in destinationFiles)
         {
-            throw new IOException(
-                $"The selected artifacts require at least {required + overhead} bytes, but the target disk has {targetCapacityBytes} bytes.");
+            if (size > uint.MaxValue)
+            {
+                throw new InvalidDataException(
+                    $"The planned file exceeds the FAT32 maximum file size of {uint.MaxValue} bytes: {path} ({size} bytes).");
+            }
         }
 
-        return new InstallPlan(actions, required + overhead);
+        ValidateDestinationShape(actions);
+
+        long required;
+        if (DiskFormatter.TryGetFat32Layout(targetCapacityBytes, out DiskFormatter.Fat32Layout layout))
+        {
+            long usedClusters = EstimateFat32UsedClusters(actions, destinationFiles, layout.ClusterSize);
+            if (usedClusters > layout.TotalDataClusters)
+            {
+                throw new IOException(
+                    $"The installation plan requires {usedClusters} FAT32 clusters, but the target disk only provides {layout.TotalDataClusters} data clusters.");
+            }
+
+            // The formatted volume already owns the root directory cluster.
+            required = checked((usedClusters - 1) * layout.ClusterSize);
+        }
+        else
+        {
+            // Unsupported sizes are only used by unit-test targets; retain the
+            // historical logical-size estimate for those plans.
+            long logical = destinationFiles.Values.Aggregate(0L, checked((total, size) => total + size));
+            long overhead = Math.Max(16L * 1024 * 1024, logical / 20);
+            required = checked(logical + overhead);
+            if (required > targetCapacityBytes)
+            {
+                throw new IOException(
+                    $"The selected artifacts require at least {required} bytes, but the target disk has {targetCapacityBytes} bytes.");
+            }
+        }
+
+        return new InstallPlan(actions, required);
     }
 
     internal static async Task ExecuteAsync(
@@ -228,7 +257,7 @@ internal static class InstallService
         }
     }
 
-    private static string ResolveStagedSource(string stagingPath, InstallOperation operation)
+    internal static string ResolveStagedSource(string stagingPath, InstallOperation operation)
     {
         if (string.IsNullOrWhiteSpace(stagingPath))
             throw new InvalidOperationException($"{operation.Kind} requires a staging root.");
@@ -297,12 +326,84 @@ internal static class InstallService
         {
             if (directories.Contains(file))
                 throw new InvalidDataException($"The installation plan treats the same FAT path as both a file and directory: {file}");
-            if (files.Any(other =>
-                !string.Equals(file, other, StringComparison.OrdinalIgnoreCase) &&
-                other.StartsWith(file.TrimEnd('/') + '/', StringComparison.OrdinalIgnoreCase)))
+
+            int index = file.LastIndexOf('/');
+            while (index > 0)
             {
-                throw new InvalidDataException($"The installation plan places another file beneath file path: {file}");
+                string parent = file[..index];
+                if (files.Contains(parent))
+                    throw new InvalidDataException($"The installation plan places another file beneath file path: {parent}");
+                index = file.LastIndexOf('/', index - 1);
             }
         }
     }
+
+    private static long EstimateFat32UsedClusters(
+        IReadOnlyList<PlannedInstallAction> actions,
+        IReadOnlyDictionary<string, long> destinationFiles,
+        int clusterSize)
+    {
+        HashSet<string> directories = new(StringComparer.OrdinalIgnoreCase) { "." };
+        foreach (PlannedInstallAction action in actions)
+        {
+            if (action.Kind == PlannedActionKind.CreateDirectory)
+                AddDirectoryAndAncestors(action.DestinationRelativePath, directories);
+        }
+        foreach (string file in destinationFiles.Keys)
+            AddDirectoryAndAncestors(GetParentDirectory(file), directories);
+
+        Dictionary<string, long> entries = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string directory in directories)
+            entries[directory] = directory == "." ? 1 : 2;
+
+        foreach (string directory in directories)
+        {
+            if (directory == ".")
+                continue;
+            entries[GetParentDirectory(directory)] += EntryCount(GetName(directory));
+        }
+        foreach (string file in destinationFiles.Keys)
+            entries[GetParentDirectory(file)] += EntryCount(GetName(file));
+
+        long usedClusters = 0;
+        foreach (long entryCount in entries.Values)
+        {
+            long directoryBytes = checked(entryCount * 32);
+            long directoryClusters = Math.Max(1, (directoryBytes + clusterSize - 1) / clusterSize);
+            usedClusters = checked(usedClusters + directoryClusters);
+        }
+
+        foreach (long size in destinationFiles.Values)
+        {
+            long fileClusters = size == 0 ? 0 : (size + clusterSize - 1) / clusterSize;
+            usedClusters = checked(usedClusters + fileClusters);
+        }
+
+        return usedClusters;
+    }
+
+    private static void AddDirectoryAndAncestors(string path, HashSet<string> directories)
+    {
+        string current = path;
+        while (current != ".")
+        {
+            directories.Add(current);
+            int index = current.LastIndexOf('/');
+            current = index > 0 ? current[..index] : ".";
+        }
+    }
+
+    private static string GetParentDirectory(string path)
+    {
+        int index = path.LastIndexOf('/');
+        return index > 0 ? path[..index] : ".";
+    }
+
+    private static string GetName(string path)
+    {
+        int index = path.LastIndexOf('/');
+        return index >= 0 ? path[(index + 1)..] : path;
+    }
+
+    private static long EntryCount(string name) => 1L + (name.Length + 12) / 13;
 }
