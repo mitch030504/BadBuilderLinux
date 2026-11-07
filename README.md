@@ -1,109 +1,130 @@
 # BadBuilderLinux
 
-BadBuilderLinux is a Linux-first, safety-hardened fork of [Pdawg-bytes/BadBuilder](https://github.com/Pdawg-bytes/BadBuilder). It prepares a FAT32 USB drive for the Xbox 360 BadUpdate or ABadAvatar exploit. It downloads and verifies the selected exploit, bootstrap, dashboard update, and homebrew archives; validates and stages everything; then formats and installs the complete plan.
+Prepare an Xbox 360 USB with BadUpdate, ABadAvatar, or the Peer Pressure softmod installer. BadBuilderLinux downloads the required files, verifies and stages them, then formats and installs the complete USB layout.
 
-The executable and .NET project retain the `BadBuilder` name for compatibility. This fork supports self-contained `win-x64` and `linux-x64` builds, preserves Windows behavior, and adds a native Linux disk backend. Linux is tested primarily on CachyOS/Arch and targets mainstream systemd desktops. macOS is not supported.
+This is a Linux-first fork of [Pdawg-bytes/BadBuilder](https://github.com/Pdawg-bytes/BadBuilder), with self-contained Linux and Windows x64 builds. The executable and .NET project retain the `BadBuilder` name. Linux is tested primarily on CachyOS/Arch and targets mainstream systemd desktops; macOS is unsupported.
+
+**New in v2.4.0:** Peer Pressure installer support, homebrew installation through its extras catalog, and Aurora default-dashboard setup. See the [changelog](CHANGELOG.md) for release history.
 
 > [!CAUTION]
-> BadBuilder erases the selected USB disk. It deliberately offers only writable USB/removable/hot-plug whole disks and excludes devices backing the operating system, boot, home, swap, the current workspace, or its cache. Always verify the model, size, serial, and exact device path before typing the final confirmation.
+> Preparing a USB erases the entire selected disk. Check its device path, model, size, and serial before confirming. Save any console backups elsewhere before reusing an installer USB.
 
-## Safety model
+## Download and run
 
-All downloads, archive extraction, and installation planning finish before BadBuilder asks for destructive confirmation. The preflight phase enforces trusted SHA-256 metadata where available, requires explicit approval for checksum-less bytes, rejects unsafe archive paths and FAT-incompatible names, validates expected archive layouts, detects case-insensitive destination collisions, and checks staging and target capacity.
+Get the binaries and `SHA256SUMS` from the [latest release](https://github.com/mitch030504/BadBuilderLinux/releases/latest). The published binaries include the .NET runtime.
 
-On Linux, run the interactive application as your normal desktop user. BadBuilder invokes its own hidden disk helper through `sudo` only for preparation and cleanup. The helper independently re-enumerates the selected disk, verifies its fingerprint, takes a per-device lease, normally unmounts child volumes, creates an MBR with one `BADUPDATE` FAT32 partition, and mounts it below `/run/badbuilder/<uid>/<token>` with `nodev,nosuid,noexec` and caller ownership. It flushes and normally unmounts the USB when installation ends. It never uses force or lazy unmounting.
+| Platform | Download | Launch |
+| --- | --- | --- |
+| Linux x64 | `BadBuilder-linux-x64` | Make executable and run as your desktop user |
+| Windows x64 | `BadBuilder-win-x64.exe` | Launch and accept the administrator prompt |
 
-On Windows, the published `win-x64` executable includes an administrator manifest and may show a UAC elevation prompt when launched normally; launching from an Administrator terminal also works. BadBuilder additionally checks its administrator privileges at runtime. It excludes the Windows system disk, accepts USB/removable media only, requires every volume lock and dismount to succeed, revalidates identity immediately before formatting, and waits for drive-letter reassignment after refreshing the partition table. The Linux executable has no elevation manifest.
-
-Ctrl+C cancels downloads, extraction, and other preflight work. Once the exact device-path confirmation has been accepted and formatting starts, cancellation is deferred until disk cleanup finishes.
-
-## Linux prerequisites
-
-Install `sudo` and the standard util-linux/coreutils commands: `lsblk`, `findmnt`, `wipefs`, `blockdev`, `mount`, `umount`, and `sync`. `udevadm` is optional; BadBuilder polls for the new partition when it is unavailable. DiscUtils creates FAT32 itself, so `dosfstools` is not required.
-
-On CachyOS or Arch, these tools are normally supplied by the `sudo`, `util-linux`, `util-linux-libs`, `coreutils`, and `systemd` packages.
-
-Launch the Linux binary without sudo:
+On Linux, download the Linux binary and `SHA256SUMS` into the same directory, then run:
 
 ```bash
-./BadBuilder
+sha256sum --ignore-missing -c SHA256SUMS
+chmod +x BadBuilder-linux-x64
+./BadBuilder-linux-x64
 ```
 
-Do not run `sudo ./BadBuilder`. Interactive root launches are refused.
+Linux requires `sudo` and the standard util-linux/coreutils commands: `lsblk`, `findmnt`, `wipefs`, `blockdev`, `mount`, `umount`, and `sync`. `udevadm` is optional; DiscUtils creates FAT32, so `dosfstools` is unnecessary. On CachyOS/Arch these commands normally come from `sudo`, `util-linux`, `util-linux-libs`, `coreutils`, and `systemd`.
 
-## Using BadBuilder
+Run without sudo. BadBuilder requests sudo only for USB preparation and cleanup. On Windows, an Administrator terminal also works.
 
-1. Open **Target drive** and choose the USB device. Fixed and protected disks are not shown.
-2. Select BadUpdate, ABadAvatar Public Beta, or the pinned ABadAvatar 1.3 Beta build, then choose XeUnshackle, XeUnshackle Max, or FreeMyXe as a post-exploit bootstrap and any desired homebrew. Dashboard Update is a separate install mode for official `2.0.17559.0` update files.
-3. Choose **Install**. BadBuilder resolves releases, verifies or explicitly approves hashes, extracts into a unique temporary run directory, validates layouts, and builds the complete copy plan.
-4. Review the displayed path, model, byte size, and serial/WWN. Type the exact device path to authorize formatting.
-5. Wait for the success message. Linux automatically flushes and unmounts the USB. Windows leaves its assigned drive letter in place for normal eject.
+## Choose a workflow
 
-Expected disk, network, cache, and archive errors are shown as actionable messages and return to the menu. Detailed stack traces are written only to the per-user diagnostic log.
+| Workflow | Select | Payload and homebrew |
+| --- | --- | --- |
+| BadUpdate | **Exploit → BadUpdate** | Rock Band Blitz demo, your chosen bootstrap, and USB homebrew |
+| ABadAvatar | **Exploit → ABadAvatar** or **ABadAvatar 1.3 Beta** | Your chosen bootstrap and USB homebrew |
+| Peer Pressure | **Exploit → Peer Pressure** | Official installer, Rock Band Blitz demo, bundled XeLL, and homebrew extras for the HDD |
+| Official dashboard update | **Update Xbox Dashboard** | Official `2.0.17559.0` update files |
+
+1. Open **Target drive** and choose the USB. Fixed, protected, and read-only disks are excluded.
+2. Choose the workflow above. For BadUpdate or ABadAvatar, select XeUnshackle, XeUnshackle Max, or FreeMyXe under **Post-exploit bootstrap**. Open **Homebrew** to add or remove apps.
+3. Choose **Install**. Downloads, checksums, extraction, layout validation, capacity checks, and the complete copy plan finish first.
+4. Review the device identity and type its exact path to authorize erasing it.
+5. Wait for completion. Linux flushes and unmounts the USB; Windows leaves it ready for normal eject. Resolve any cleanup warning before removing the drive.
+
+Expected disk, network, cache, and archive failures return to the menu with an error message. Stack traces go to the per-user diagnostic log. Ctrl+C cancels preflight work; after formatting starts, cancellation is deferred until cleanup finishes.
 
 > [!WARNING]
-> ABadAvatar 1.3 Beta is still a prerelease. Disconnect the Xbox 360 from both Ethernet and Wi-Fi before triggering it. Its release notes also warn that a connected Kinect can significantly reduce the exploit success rate.
+> ABadAvatar 1.3 Beta is a prerelease. Its upstream notes advise disconnecting Ethernet and Wi-Fi before triggering it and warn that a connected Kinect can reduce success rates.
 
-## XeUnshackle Max
+## Peer Pressure and Aurora
 
-**Fixed in v2.3.1:** A missing exploit-side `BadUpdatePayload/default.xex` no longer makes the XeUnshackle or XeUnshackle Max install plan fail. That file may be created or overwritten as needed; all other undeclared collisions are still rejected.
+Peer Pressure mode uses the [official v1.0.477 `SoftmodInstaller.zip`](https://github.com/grimdoomer/Xbox360PeerPressure/releases/tag/v1.0.477), pinned to its exact tag and upstream-published SHA-256. It includes its own exploit payload, so the bootstrap menu is hidden. The upstream license, extras catalog, and bundled XeLL are preserved.
 
-XeUnshackle Max is an additional post-exploit bootstrap choice alongside the original XeUnshackle and FreeMyXe. Its pinned source is [klofi/XeUnshackle-Max v1.0.0](https://github.com/klofi/XeUnshackle-Max/releases/tag/v1.0.0), an independent **beta** fork of Byrom90's XeUnshackle.
+### Prepare the USB
 
-The fork adds optional automatic startup, CPU/DVD-key masking, boot-video skipping and volume control, and custom boot-video playback. On the Xbox 360, pressing Start can create a XeUnshackleConfig.txt next to BadUpdatePayload/default.xex. See the [upstream configuration documentation](https://github.com/klofi/XeUnshackle-Max#features). Both XeUnshackle variants support default homebrew launching through launch.ini.
+1. Select **Exploit → Peer Pressure**.
+2. Open **Homebrew** to choose the packaged apps. Aurora, XeXMenu, and Simple 360 NAND Flasher are included by default; custom archives can be added.
+3. For automatic Aurora startup, choose **Set default dashboard → Aurora**. Choose a dashboard here; maintenance tools such as NAND Flasher are also selectable and should not be used as dashboards.
+4. Select the target USB and choose **Install**.
 
-BadBuilderLinux pins the exact v1.0.0 ZIP and its upstream-published SHA-256. It copies the BadUpdatePayload directory and launch.ini, intentionally **not** installing the bundled JRPC2/Xbdm remote-access binaries automatically. You can add those plugins manually after reviewing the security implications. The upstream launch.ini may reference plugins that are not present on the freshly formatted USB.
+BadBuilder stages each app under `BadUpdatePayload/SoftmodExtras` and appends its installation entry to `SoftmodExtras.ini`. The selected dashboard gets a `DashXex` setting after its executable has been checked. Apps install to `Hdd1:\Apps\...`; XeXMenu retains its `Hdd1:\Content\...` layout. Peer Pressure uses its own dashboard setting. DashLaunch and its plugins are unsupported.
 
-The existing preflight and disk-identity checks remain mandatory. XeUnshackle Max is not a permanent softmod. Do not flash modified NAND images or overwrite files in the console's flash. Read the upstream warnings before use.
+### Apply it on the Xbox
 
-## Storage locations
+Follow the [official installation guide](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Installation). Launch the Rock Band Blitz demo and press A at the title screen. Create and keep a system backup, then enable **Install Extras** and select the apps you want, including **Aurora** to apply its default-dashboard setting. Use the appropriate installation option for your console; **Extras Only** installs the selected extras onto an existing Peer Pressure setup.
 
-Persistent downloads and their manifests live in the user cache:
+If Aurora is already installed and you forgot to set the default, use **Guide → Settings → Softmod Settings → Dashboard** to choose `Hdd1:\Apps\Aurora\Aurora.xex`. See the [upstream settings guide](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Softmod-Settings). A dashboard startup problem can be bypassed with [Peer Pressure safe mode](https://github.com/grimdoomer/Xbox360PeerPressure/wiki/Booting-Your-Console): with the console off, hold Sync, power on with Eject, and keep holding Sync until the MS dashboard loads.
 
-- Linux: `$XDG_CACHE_HOME/badbuilder`, or `~/.cache/badbuilder`
-- Windows: `%LOCALAPPDATA%\BadBuilder\Cache`
+> [!WARNING]
+> Peer Pressure supports Xenon, Zephyr, Falcon, Jasper, and Trinity; Corona and Winchester are unsupported. An HDD is required, with a mechanical SATA HDD recommended. Installation modifies NAND and HDD security sectors; failure can cause data loss or prevent booting and may require a hardware NAND flasher. Back up the NAND, CPU fuses/key, and HDD security sectors with the official installer, and keep those files somewhere safe outside the USB.
 
-Transient extraction uses a unique directory below the operating-system temporary directory and is removed after each run. Existing legacy `Work` directories are intentionally left untouched.
+Aurora default-dashboard startup has been confirmed on one physical setup. That report does not establish compatibility across all console and HDD combinations.
 
-## Download integrity
+## Other bootstraps
 
-GitHub release sources use an exact asset glob and an explicit release policy. Drafts are never selected; the original ABadAvatar entry may use its newest prerelease, while ABadAvatar 1.3 Beta is pinned to the exact `avatar-v1.3-beta` release and SHA-256. Other moving sources use the newest stable release. Zero or multiple matching assets are errors. GitHub's per-asset `digest` metadata and catalog-pinned SHA-256 values are treated as trusted and enforced strictly.
+XeUnshackle and XeUnshackle Max support default USB homebrew launching through `launch.ini`; FreeMyXe supplies a lightweight payload without that automatic-launch integration.
 
-When a trusted checksum is unavailable, BadBuilder displays the source, release, asset, and computed SHA-256 and asks for explicit approval. The approved bytes are recorded in the cache manifest; changed bytes trigger a new warning. Downloads stream into a partial file, verify their length and hash, and replace a cache entry only after success. A failed download cannot overwrite a valid cached archive.
+XeUnshackle Max is an independent **beta** fork pinned to [klofi/XeUnshackle-Max v1.0.0](https://github.com/klofi/XeUnshackle-Max/releases/tag/v1.0.0) and its upstream SHA-256. It adds configurable auto-start, CPU/DVD-key masking, and boot-video options; see the [upstream documentation](https://github.com/klofi/XeUnshackle-Max#features). BadBuilder copies its `BadUpdatePayload` and `launch.ini`. Bundled JRPC2/Xbdm remote-access binaries are omitted; the supplied `launch.ini` may reference plugins that are absent.
 
-## Building and testing
+Both XeUnshackle variants can create or replace `BadUpdatePayload/default.xex` during preflight; other undeclared collisions are rejected. These bootstraps are not persistent softmods. Do not flash modified NAND images or overwrite console flash files when using them.
 
-The project requires the .NET 10 SDK.
+## Disk and download safeguards
+
+BadBuilder offers only eligible writable USB/removable/hot-plug whole disks. It validates the complete installation plan before destructive confirmation, rejects unsafe archive paths, FAT-incompatible names, and unintended file collisions, and rechecks the disk identity before formatting.
+
+On Linux, disks backing the OS, boot, home, swap, workspace, or cache are excluded. The scoped sudo helper independently checks the disk fingerprint, takes a per-device lease, unmounts child volumes, creates an MBR with one `BADUPDATE` FAT32 partition, and mounts it below `/run/badbuilder/<uid>/<token>` with `nodev,nosuid,noexec` and caller ownership. Cleanup flushes and normally unmounts it; force and lazy unmounting are not used.
+
+On Windows, system disks are excluded and USB/removable media is required. Every volume lock and dismount must succeed, disk identity is revalidated, and drive-letter reassignment is checked after formatting. The published Windows executable requests administrator privileges; the Linux executable has no elevation manifest.
+
+GitHub sources require exactly one matching asset and an explicit release policy. Drafts are excluded. Peer Pressure, ABadAvatar 1.3 Beta, and XeUnshackle Max use pinned releases and SHA-256 values. Other sources follow their configured stable/prerelease policies. GitHub asset digests and catalog pins are enforced; when no trusted checksum exists, BadBuilder asks you to approve the displayed source and computed hash. Changed bytes require fresh approval, and failed downloads cannot replace valid cached archives.
+
+Downloads and manifests are cached at `$XDG_CACHE_HOME/badbuilder` (otherwise `~/.cache/badbuilder`) on Linux and `%LOCALAPPDATA%\BadBuilder\Cache` on Windows. Transient extraction directories are removed after each run; legacy `Work` directories are left alone. If online metadata and valid cache entries are unavailable, local archives go through the same verification, approval, extraction, and planning checks. Configured built-in apps are never silently skipped.
+
+## Build and test
+
+The source requires the .NET 10 SDK.
 
 ```bash
 dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj
-dotnet build BadBuilder/BadBuilder.csproj -c Release --no-restore
-dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
+dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
+dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-build --no-restore
 dotnet publish BadBuilder/BadBuilder.csproj -c Release -r linux-x64 --self-contained true --no-restore
 dotnet publish BadBuilder/BadBuilder.csproj -c Release -r win-x64 --self-contained true --no-restore
 ```
 
-Nullable, platform, and analyzer warnings fail the build. The unit suite covers Linux inventory parsing and system ancestry, identity changes, shell-free command construction, release and asset policies, checksum/cache behavior, unsafe archives and extraction limits, Xbox path handling, `launch.ini` preservation, preflight copy planning, and FAT32 formatting against disposable raw images.
+Nullable, platform, and analyzer warnings fail the build. The suite covers disk inventory and identity, downloads and cache integrity, archive limits and paths, install planning, FAT32 formatting against disposable images, and Peer Pressure extras, default-dashboard paths, and catalog injection checks.
 
-Two destructive tests are opt-in and never run in normal CI:
+Optional checks:
 
-- Set `BADBUILDER_LOOP_TEST=1` and run the loop integration test as root. It creates its own sparse image below the test temporary directory and proves the `/dev/loop*` backing file is that exact image before formatting, mounting, copying, flushing, unmounting, and detaching it.
-- A physical USB end-to-end test must be performed manually. Re-enumerate the sacrificial device and obtain a fresh confirmation of its path, model, size, and serial immediately before every run.
+- `BADBUILDER_LIVE_SMOKE=1` resolves upstream sources without downloading assets or touching a disk.
+- `BADBUILDER_PEER_PRESSURE_ARCHIVES=/path/to/archives` enables the real-archive integration test. Supply `SoftmodInstaller.zip`, `GameData.zip`, `Aurora.rar`, `MenuData.7z`, and `Flasher.7z`. The test verifies the installer checksum, extracts and installs into a temporary directory, compares copied-file hashes, and checks Aurora's generated dashboard setting.
+- `BADBUILDER_LOOP_TEST=1` enables the root-only loop-device test. It creates and verifies its own disposable backing image before formatting, mounting, copying, and cleaning up. Normal CI never runs it.
+- Physical USB tests are manual. Recheck the sacrificial device's path, model, size, and serial immediately before each destructive run.
 
-Set `BADBUILDER_LIVE_SMOKE=1` to resolve all upstream catalog sources without downloading an asset or touching a disk.
+## Releases
 
-## Publishing a release
+See [CHANGELOG.md](CHANGELOG.md) and the [release notes](.github/release-notes). To publish, increase `VersionPrefix` in `BadBuilder/BadBuilder.csproj`, add matching `.github/release-notes/vX.Y.Z.md`, update the changelog, and merge to `main`. GitHub Actions builds and tests Linux and Windows, validates versions and binary formats, generates checksums, and publishes the tag and release. An existing release is skipped; rerun the workflow to retry a failed publication.
 
-Releases are published by GitHub Actions after the VersionPrefix in BadBuilder/BadBuilder.csproj is increased on main. Add the corresponding release notes at .github/release-notes/vX.Y.Z.md before merging. The release.yml workflow builds and tests both supported x64 platforms, verifies the version strings and native binary formats, generates SHA-256 checksums, then creates the matching version tag and GitHub release. An already-published version is skipped. To retry a failed release, rerun the workflow from GitHub Actions.
-
-## Offline archives
-
-If release metadata is unavailable and no valid cache exists, BadBuilder asks for a local archive for every configured artifact. No configured built-in homebrew is silently skipped. Local files go through the same checksum, approval, extraction, layout, and preflight checks as downloads.
+Previous binaries remain available on the releases page. Returning to an older builder affects future USB preparation; use Peer Pressure's official recovery/uninstall procedures for an already modified console.
 
 ## Credits
 
-- Pdawg11239 / [Pdawg-bytes](https://github.com/Pdawg-bytes/BadBuilder) — original BadBuilder project
-- Grimdoomer — [BadUpdate](https://github.com/grimdoomer/Xbox360BadUpdate)
+- Pdawg11239 / [Pdawg-bytes](https://github.com/Pdawg-bytes/BadBuilder) — original BadBuilder
+- Grimdoomer — [BadUpdate](https://github.com/grimdoomer/Xbox360BadUpdate) and [Peer Pressure](https://github.com/grimdoomer/Xbox360PeerPressure)
 - Shutterbug2000 — [ABadAvatar](https://github.com/shutterbug2000/ABadAvatar)
 - Bibarub — [ABadAvatar 1.3 Beta](https://github.com/bibarub/Xbox360BadUpdate/releases/tag/avatar-v1.3-beta)
 - FreeMyXe Team / InvoxiPlayGames — [FreeMyXe](https://github.com/FreeMyXe/FreeMyXe)
