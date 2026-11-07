@@ -74,17 +74,23 @@ public sealed class InstallPlanSafetyTests
         Assert.InRange(plan.RequiredBytes, 512L * 1024 * 1024 + 1, OneGiB - 1);
     }
 
-    [Fact]
-    public void Fat32Layout_MatchesFormattedImageBootSector()
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(4L)]
+    [InlineData(8L)]
+    [InlineData(16L)]
+    [InlineData(32L)]
+    public void Fat32Layout_MatchesFormattedImageBootSector(long sizeGiB)
     {
+        long diskSize = sizeGiB * OneGiB;
         using TemporaryDirectory temporary = new();
         string imagePath = Path.Combine(temporary.Path, "disk.img");
         using (FileStream create = new(imagePath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
-            create.SetLength(OneGiB);
+            create.SetLength(diskSize);
         using (FileStream stream = new(imagePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-            DiskFormatter.FormatFat32(stream, OneGiB);
+            DiskFormatter.FormatFat32(stream, diskSize);
 
-        Assert.True(DiskFormatter.TryGetFat32Layout(OneGiB, out DiskFormatter.Fat32Layout layout));
+        Assert.True(DiskFormatter.TryGetFat32Layout(diskSize, out DiskFormatter.Fat32Layout layout));
 
         using FileStream image = new(imagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         using Disk disk = new(image, Ownership.None);
@@ -125,6 +131,25 @@ public sealed class InstallPlanSafetyTests
                 new InstallOperation(InstallOperationKind.WriteFile, "bundle", Contents: "file"),
                 new InstallOperation(InstallOperationKind.WriteFile, "bundle/child.txt", Contents: "child"),
             ],
+            128L * 1024 * 1024));
+
+        Assert.Contains("beneath file path", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InstallPlan_RejectsDirectoryPlacedBeneathAnotherFilePath()
+    {
+        using TemporaryDirectory temporary = new();
+        string staging = Path.Combine(temporary.Path, "staging");
+        Directory.CreateDirectory(staging);
+
+        ArtifactDefinition artifact = new(
+            "artifact", "Artifact", "Test", string.Empty, null,
+            [new InstallOperation(InstallOperationKind.CopyDirectory, "bundle/sub", ".")]);
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(() => InstallService.BuildPlan(
+            [(artifact, staging)],
+            [new InstallOperation(InstallOperationKind.WriteFile, "bundle", Contents: "file")],
             128L * 1024 * 1024));
 
         Assert.Contains("beneath file path", error.Message, StringComparison.Ordinal);

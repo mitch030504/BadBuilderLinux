@@ -190,7 +190,7 @@ internal sealed class LinuxDiskBackend : IDiskBackend
     {
         processPath ??= Environment.ProcessPath
             ?? throw new InvalidOperationException("The current executable path is unavailable.");
-        entryAssemblyPath ??= Assembly.GetEntryAssembly()?.Location;
+        entryAssemblyPath ??= GetEntryAssemblyPath();
 
         List<string> arguments = ["--", processPath];
         if (string.Equals(Path.GetFileNameWithoutExtension(processPath), "dotnet", StringComparison.OrdinalIgnoreCase))
@@ -202,6 +202,19 @@ internal sealed class LinuxDiskBackend : IDiskBackend
 
         arguments.AddRange(helperArguments);
         return (sudoPath, arguments);
+    }
+
+    private static string? GetEntryAssemblyPath()
+    {
+        string? assemblyName = Assembly.GetEntryAssembly()?.GetName().Name;
+        if (string.IsNullOrWhiteSpace(assemblyName))
+            return null;
+
+        // Assembly.Location is empty in a single-file publish. The helper is
+        // only invoked through a .dll when the current process is dotnet, so
+        // locate that assembly next to the app base directory instead.
+        string candidate = Path.Combine(AppContext.BaseDirectory, assemblyName + ".dll");
+        return File.Exists(candidate) ? candidate : null;
     }
 
     private static async Task<LinuxHelperResponse> InvokeHelperAsync(IReadOnlyList<string> helperArguments, CancellationToken cancellationToken)

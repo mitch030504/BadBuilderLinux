@@ -212,6 +212,21 @@ internal static class LinuxDiskHelper
         string lockPath = GetLockPath(request.Fingerprint);
 
         await using FileStream operationLock = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        if (!File.Exists(leasePath))
+        {
+            // A reboot or a crash after a successful unmount can remove the
+            // /run lease while the app still has a persisted recovery record.
+            // Treat that as already complete only when the mount is gone too.
+            string expectedMount = request.Mount
+                ?? throw new ArgumentException("The finalize operation requires --mount.");
+            if (await IsMountedAsync(expectedMount, CancellationToken.None))
+                throw new DiskSafetyException("No active disk lease exists for this finalize request.");
+
+            DeleteEmptyMountDirectories(expectedMount, request.Uid);
+            return new LinuxHelperResponse(Success: true);
+        }
+
         LeaseRecord lease = await ReadLeaseAsync(leasePath);
         if (!lease.Matches(request))
             throw new DiskSafetyException("The finalize request does not match the active disk lease.");

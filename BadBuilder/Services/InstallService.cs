@@ -336,6 +336,21 @@ internal static class InstallService
                 index = file.LastIndexOf('/', index - 1);
             }
         }
+
+        foreach (string directory in directories)
+        {
+            if (directory == ".")
+                continue;
+
+            int index = directory.LastIndexOf('/');
+            while (index > 0)
+            {
+                string parent = directory[..index];
+                if (files.Contains(parent))
+                    throw new InvalidDataException($"The installation plan places another directory beneath file path: {parent}");
+                index = directory.LastIndexOf('/', index - 1);
+            }
+        }
     }
 
     private static long EstimateFat32UsedClusters(

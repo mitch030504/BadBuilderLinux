@@ -43,7 +43,9 @@ internal static class DiskFormatter
             : diskSize <= 2113929216 ? 64
             : diskSize > 4227858432 ? 255
             : 128;
-        long cylinders = Math.Min(1024L, diskSize / (63L * heads * 512L));
+        // BiosPartitionTable.Create rebuilds allocation geometry from the disk
+        // length, so its cylinder count is not capped at the BIOS-safe 1024.
+        long cylinders = diskSize / (63L * heads * 512L);
         long sectorCount = 63L * (cylinders * heads - 1);
 
         int sectorsPerCluster = sectorCount <= 532480 ? 1

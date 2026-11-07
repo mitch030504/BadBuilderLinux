@@ -122,7 +122,7 @@ internal static class DownloadService
                 ArtifactReference reference = await ResolveReferenceAsync(artifact, githubClient, cancellationToken);
                 resolved.Add(new ResolvedArtifact(artifact, reference, null));
             }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or TaskCanceledException or TimeoutException)
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or TaskCanceledException or TimeoutException or JsonException)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Controls.WriteWarning($"{artifact.DisplayName} could not be resolved online: {ex.Message}");
@@ -226,9 +226,7 @@ internal static class DownloadService
             or IOException
             or HttpRequestException
             or TimeoutException
-            or UnauthorizedAccessException
-            or NotSupportedException
-            or ArgumentException;
+            or UnauthorizedAccessException;
 
     private static async Task<DownloadPlan> CreatePlanAsync(
         ResolvedArtifact item,

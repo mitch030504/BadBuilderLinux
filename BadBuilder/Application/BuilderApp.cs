@@ -98,7 +98,17 @@ internal static partial class BuilderApp
             FinalizeResult result = await DiskService.FinalizeAsync(pending, CancellationToken.None);
             if (result.Success)
             {
-                PendingCleanupStore.Clear();
+                try
+                {
+                    PendingCleanupStore.Clear();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    DiagnosticLog.Error(ex, "Could not clear the pending USB cleanup record.");
+                    Controls.WriteWarning(
+                        "The USB was cleaned up, but the pending cleanup record could not be removed. Retry cleanup to clear it.");
+                }
+
                 Controls.WriteSuccess(OperatingSystem.IsLinux()
                     ? "USB cleanup completed and the drive was safely unmounted."
                     : "USB cleanup completed.");
@@ -285,7 +295,16 @@ internal static partial class BuilderApp
                         finalizedSuccessfully = result.Success;
                         if (result.Success)
                         {
-                            PendingCleanupStore.Clear();
+                            try
+                            {
+                                PendingCleanupStore.Clear();
+                            }
+                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                            {
+                                DiagnosticLog.Error(ex, "Could not clear the pending USB cleanup record.");
+                                Controls.WriteWarning(
+                                    "The USB was cleaned up, but the pending cleanup record could not be removed. Retry cleanup to clear it.");
+                            }
                         }
                         else
                         {
