@@ -16,8 +16,20 @@ internal sealed class BuilderConfig
 
     internal bool FirmwareUpdateEnabled { get; set; }
 
+    internal bool IsPeerPressureInstall => !FirmwareUpdateEnabled && SelectedExploit == ExploitOption.PeerPressure;
+
     public override string ToString()
     {
+        if (IsPeerPressureInstall)
+            return $"""
+                Target drive: {TargetDisk}
+
+                Selected exploit: Peer Pressure
+                USB contents: Official softmod installer and Rock Band Blitz demo (includes XeLL).
+                Installer extras: {string.Join(", ", Homebrew.Select(item => item.Artifact.DisplayName))}
+                Default dashboard: {LaunchHomebrew?.Artifact.DisplayName ?? "N/A"}
+                """;
+
         return 
         $"""
             Target drive: {TargetDisk}

@@ -14,14 +14,17 @@ internal static partial class BuilderApp
             Controls.ShowConfigurationSummary(Config);
 
             string action = Controls.PromptSelection(
-                "Homebrew configuration", 
+                Config.IsPeerPressureInstall ? "Peer Pressure installer extras" : "Homebrew configuration",
                 [
                     new MenuOption<string>("add", "Add homebrew", "Add from archive"),
                     new MenuOption<string>("remove", "Remove homebrew", Config.Homebrew.Count == 0 ? "None" : $"{Config.Homebrew.Count} configured"),
-                    new MenuOption<string>("launch", "Set default launch", GetLaunchDisplayName()),
-                    new MenuOption<string>("clear-launch", "Clear default launch", "Do not auto-launch a homebrew app"),
+                    new MenuOption<string>("launch", Config.IsPeerPressureInstall ? "Set default dashboard" : "Set default launch", GetLaunchDisplayName()),
+                    new MenuOption<string>("clear-launch", Config.IsPeerPressureInstall ? "Clear default dashboard" : "Clear default launch", "Do not auto-launch a homebrew app"),
                     new MenuOption<string>("back", "Back")
-                ]
+                ],
+                Config.IsPeerPressureInstall
+                    ? "Packages apps for installation to the HDD. Select Install Extras on the console to install them; DashLaunch plugins are unsupported."
+                    : null
             );
 
             switch (action)
@@ -167,7 +170,7 @@ internal static partial class BuilderApp
 
     private static void ConfigureLaunchHomebrew()
     {
-        if (!BootstrapCapabilities.SupportsDefaultHomebrewLaunch(Config.SelectedBootstrap))
+        if (!Config.IsPeerPressureInstall && !BootstrapCapabilities.SupportsDefaultHomebrewLaunch(Config.SelectedBootstrap))
         {
             Controls.WriteWarning("Automatic homebrew launch requires XeUnshackle or XeUnshackle Max.");
             Controls.Pause();
@@ -190,7 +193,7 @@ internal static partial class BuilderApp
             new MenuOption<string?>(null, "Back")
         ];
 
-        string? selectedLaunch = Controls.PromptSelection("Choose default launch program", options);
+        string? selectedLaunch = Controls.PromptSelection(Config.IsPeerPressureInstall ? "Choose default dashboard" : "Choose default launch program", options);
 
         if (selectedLaunch is null)
             return;

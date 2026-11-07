@@ -4,6 +4,37 @@ internal static class ArtifactCatalog
 {
     private static readonly Dictionary<ExploitOption, ArtifactDefinition> ExploitMap = new()
     {
+        [ExploitOption.PeerPressure] = new
+        (
+            "exploit-peerpressure",
+            "Peer Pressure",
+            "Persistent softmod installer; requires an HDD and a supported console (not Corona/Winchester)",
+            "exploit",
+            new GitHubReleaseSource(
+                "grimdoomer",
+                "Xbox360PeerPressure",
+                "SoftmodInstaller.zip",
+                ReleaseSelectionPolicy.ExactTag,
+                "v1.0.477",
+                "7C7D42C301E72145B9D1F0A0E23FF164FDEFBBE780C2019A3CE7465E963B1827"),
+            [new InstallOperation(InstallOperationKind.CopyDirectory, ".", ".")],
+            ArtifactPriority.Exploit,
+            Layout: new ArchiveLayout([
+                "BadUpdatePayload/default.xex",
+                "BadUpdatePayload/BadUpdateExploit-2ndStage.bin",
+                "BadUpdatePayload/BadUpdateExploit-3rdStage.bin",
+                "BadUpdatePayload/BadUpdateExploit-4thStage.bin",
+                "BadUpdatePayload/BadUpdateExploit-Data.bin",
+                "BadUpdatePayload/SoftmodData.zip",
+                "BadUpdatePayload/bootanim.xex",
+                "BadUpdatePayload/update_data.bin",
+                "BadUpdatePayload/xke_update.bin",
+                "BadUpdatePayload/SoftmodExtras/SoftmodExtras.ini",
+                "BadUpdatePayload/SoftmodExtras/Xell/boot.ini",
+                "BadUpdatePayload/SoftmodExtras/Xell/xell-2f.bin",
+                "Content/0000000000000000/5841122D/00000001/DaTArrest_Xbox360BadUpdate"
+            ])
+        ),
         [ExploitOption.ABadAvatar] = new
         (
             "exploit-abadavatar",
@@ -210,6 +241,12 @@ internal static class ArtifactCatalog
 
         if (config.FirmwareUpdateEnabled)
             selected.Add(DashboardUpdate);
+        else if (config.IsPeerPressureInstall)
+        {
+            selected.Add(BadUpdateGameData);
+            selected.Add(ExploitMap[ExploitOption.PeerPressure]);
+            selected.AddRange(config.Homebrew.Select(entry => entry.Artifact));
+        }
         else
         {
             selected.Add(ExploitMap[config.SelectedExploit]);
