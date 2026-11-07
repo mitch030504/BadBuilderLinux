@@ -66,32 +66,6 @@ internal static class Controls
             .AddChoices(options)
     ).Value;
 
-    internal static IReadOnlyList<T> PromptMultiSelection<T>(string title, IReadOnlyList<MenuOption<T>> options, IReadOnlyCollection<T> selectedValues, string? details = null)
-    {
-        var prompt = new MultiSelectionPrompt<MenuOption<T>>()
-            .Title($"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)}]{Escape(title)}[/]" +
-                   $"{(!string.IsNullOrWhiteSpace(details) ? $"\n[gray]{Escape(details)}[/]" : "")}")
-            .PageSize(10)
-            .NotRequired()
-            .HighlightStyle(AppTheme.GreenStyle)
-            .InstructionsText("[gray](Use [white]<space>[/] to toggle, [white]<enter>[/] to confirm)[/]")
-            .UseConverter(option =>
-            {
-                string label = Escape(option.Label);
-
-                if (string.IsNullOrWhiteSpace(option.Description))
-                    return label;
-
-                return $"{label} [gray]- {Escape(option.Description)}[/]";
-            })
-            .AddChoices(options);
-
-        foreach (var option in options.Where(option => selectedValues.Contains(option.Value)))
-            prompt.Select(option);
-
-        return [..AnsiConsole.Prompt(prompt).Select(option => option.Value)];
-    }
-
     internal static bool Confirm(string title, bool defaultValue = true, bool warning = false) => AnsiConsole.Prompt(
         new TextPrompt<bool>($"{(warning ? $"[{ToMarkupColor(AppTheme.OrangeStyle.Foreground)} bold]WARNING:[/] {Escape(title)}" : Escape(title))}")
             .AddChoice(true)
@@ -118,30 +92,6 @@ internal static class Controls
         AnsiConsole.WriteLine();
         AnsiConsole.Markup($"[gray]{Escape(message)}[/]");
         Console.ReadLine();
-    }
-
-    internal static Task RunProgressAsync(IReadOnlyList<ProgressOperation> operations, CancellationToken cancellationToken)
-    {
-        return AnsiConsole.Progress()
-            .AutoClear(false)
-            .HideCompleted(false)
-            .Columns(
-                new TaskDescriptionColumn(),
-                new ProgressBarColumn().FinishedStyle(AppTheme.GreenStyle.Foreground).CompletedStyle(AppTheme.LightOrangeStyle.Foreground),
-                new PercentageColumn().CompletedStyle(AppTheme.GreenStyle.Foreground),
-                new RemainingTimeColumn().Style(Color.Gray),
-                new TransferSpeedColumn()
-            )
-            .StartAsync(async context =>
-            {
-                var tasks = operations.Select(operation =>
-                {
-                    ProgressTask task = context.AddTask(Escape(operation.Description), autoStart: true);
-                    return operation.Action(task, cancellationToken);
-                });
-
-                await Task.WhenAll(tasks);
-            });
     }
 
 
@@ -259,5 +209,4 @@ internal static class Controls
 }
 
 internal sealed record MenuOption<TValue>(TValue Value, string Label, string Description = "");
-internal sealed record ProgressOperation(string Description, Func<ProgressTask, CancellationToken, Task> Action);
 internal sealed record ArchivePathEntry(string ArtifactID, string DisplayName, string? SuggestedPath, bool Required);

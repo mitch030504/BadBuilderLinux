@@ -1,3 +1,4 @@
+using System.Text.Json;
 using BadBuilder.Configuration;
 using BadBuilder.Services;
 using BadBuilder.Services.Disks;
@@ -38,6 +39,10 @@ internal static partial class BuilderApp
                 options.RemoveAll(item => item.Value == RootAction.ConfigureBootstrap);
             }
 
+            PreparedTarget? pendingCleanup = PendingCleanupStore.TryLoad();
+            if (pendingCleanup is not null)
+                options.Insert(options.Count - 1, new(RootAction.RetryCleanup, "Retry USB cleanup"));
+
             try
             {
                 switch (Controls.PromptSelection("Select an action", options))
@@ -60,6 +65,10 @@ internal static partial class BuilderApp
                     case RootAction.Install:
                         await InstallAsync(cancellationToken);
                         break;
+                    case RootAction.RetryCleanup:
+                        if (pendingCleanup is not null)
+                            await RetryCleanupAsync(pendingCleanup, cancellationToken);
+                        break;
                     case RootAction.Exit:
                         running = false;
                         break;
@@ -78,10 +87,50 @@ internal static partial class BuilderApp
         }
     }
 
+    private static async Task RetryCleanupAsync(PreparedTarget pending, CancellationToken cancellationToken)
+    {
+        Controls.RenderHeader();
+        Controls.WriteInfo($"Device: {pending.Identity.DevicePath} ({pending.Identity.Model})");
+        Controls.WriteInfo($"Mount: {pending.MountRoot}");
+
+        try
+        {
+            FinalizeResult result = await DiskService.FinalizeAsync(pending, CancellationToken.None);
+            if (result.Success)
+            {
+                PendingCleanupStore.Clear();
+                Controls.WriteSuccess(OperatingSystem.IsLinux()
+                    ? "USB cleanup completed and the drive was safely unmounted."
+                    : "USB cleanup completed.");
+            }
+            else
+            {
+                string message = result.Error ?? "USB cleanup failed.";
+                Controls.WriteWarning(result.StillMounted
+                    ? $"{message} The USB remains mounted at {pending.MountRoot}."
+                    : message);
+                DiagnosticLog.Info($"USB finalization retry failed: {message}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            DiagnosticLog.Error(ex, "USB cleanup retry failed.");
+            Controls.WriteError($"USB cleanup could not be completed: {ex.Message}");
+        }
+
+        Controls.Pause();
+    }
+
     private static async Task InstallAsync(CancellationToken cancellationToken)
     {
         Controls.RenderHeader();
         Controls.ShowConfigurationSummary(Config);
+
+        if (PendingCleanupStore.TryLoad() is not null)
+        {
+            throw new InvalidOperationException(
+                "A previous USB cleanup is still pending. Run Retry USB cleanup from the main menu before starting a new installation.");
+        }
 
         string? runRoot = null;
         PreparedTarget? preparedTarget = null;
@@ -135,6 +184,29 @@ internal static partial class BuilderApp
             if (Config.IsPeerPressureInstall)
                 staged = PeerPressureHomebrewService.PrepareArtifacts(Config, staged);
 
+            if (!Config.FirmwareUpdateEnabled && !Config.IsPeerPressureInstall && Config.LaunchHomebrew is not null)
+            {
+                string appName = FileServices.SanitizeFatName(Config.LaunchHomebrew.Artifact.DisplayName);
+                string xboxPath = XboxPath.Combine(
+                    "Usb",
+                    "Apps",
+                    appName,
+                    Config.LaunchHomebrew.EntryPointRelativePath!);
+                string bootstrapId = ArtifactCatalog.Bootstraps[Config.SelectedBootstrap].ID;
+
+                bool configured = await LaunchIniService.ConfigureStagedLaunchAsync(
+                    staged,
+                    bootstrapId,
+                    Config.LaunchHomebrew,
+                    xboxPath,
+                    cancellationToken);
+                if (!configured)
+                {
+                    Controls.WriteWarning(
+                        "launch.ini was not present. Automatic startup will not be configured.");
+                }
+            }
+
             string configText = $"Configuration:{Environment.NewLine}{Config}";
             List<InstallOperation> extraOperations =
             [
@@ -171,25 +243,22 @@ internal static partial class BuilderApp
             Controls.WriteWarning("Disk preparation has started. Ctrl+C cancellation is disabled until cleanup finishes.");
             cancellationBlock = CancellationGate.Block();
             preparedTarget = await DiskService.PrepareAsync(selected.Identity, CancellationToken.None);
+            if (preparedTarget.RequiresFinalize)
+            {
+                try
+                {
+                    PendingCleanupStore.Save(preparedTarget);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    DiagnosticLog.Error(ex, "Could not save the pending USB cleanup record.");
+                    Controls.WriteWarning(
+                        "The pending USB cleanup record could not be saved. If cleanup fails, the USB may remain mounted.");
+                }
+            }
 
             Controls.WriteInfo("Copying the fully validated installation plan.");
             await InstallService.ExecuteAsync(installPlan, preparedTarget.MountRoot, CancellationToken.None);
-
-            if (!Config.FirmwareUpdateEnabled && !Config.IsPeerPressureInstall && Config.LaunchHomebrew is not null)
-            {
-                string iniPath = Path.Combine(preparedTarget.MountRoot, "launch.ini");
-                string appName = FileServices.SanitizeFatName(Config.LaunchHomebrew.Artifact.DisplayName);
-                string xboxPath = XboxPath.Combine(
-                    "Usb",
-                    "Apps",
-                    appName,
-                    Config.LaunchHomebrew.EntryPointRelativePath!);
-
-                if (!await LaunchIniService.UpdateDefaultAsync(iniPath, xboxPath, CancellationToken.None))
-                {
-                    Controls.WriteWarning("launch.ini was not present. Dashlaunch automatic startup was not configured.");
-                }
-            }
 
             copiedSuccessfully = true;
         }
@@ -214,7 +283,11 @@ internal static partial class BuilderApp
                     {
                         FinalizeResult result = await DiskService.FinalizeAsync(preparedTarget, CancellationToken.None);
                         finalizedSuccessfully = result.Success;
-                        if (!result.Success)
+                        if (result.Success)
+                        {
+                            PendingCleanupStore.Clear();
+                        }
+                        else
                         {
                             string message = result.Error ?? "USB cleanup failed.";
                             Controls.WriteWarning(result.StillMounted
@@ -292,5 +365,6 @@ internal enum RootAction
     ConfigureHomebrew,
     UpdateXbox,
     Install,
+    RetryCleanup,
     Exit,
 }
