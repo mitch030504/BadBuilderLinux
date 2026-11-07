@@ -43,17 +43,24 @@ internal static class PeerPressureHomebrewService
                 throw new InvalidDataException($"{name} must install from one directory to be packaged as a Peer Pressure extra.");
 
             string destination = XboxPath.Combine("Hdd1", operation.DestinationPath);
-            ini.Append(CultureInfo.InvariantCulture, $"\r\n[BadBuilder-{id}]\r\nCategory = \"Homebrew\"\r\nName = \"{name}\"\r\nDescription = \"Installs {name}.\"\r\nSource = \"{id}\"\r\nDestination = \"{destination}\"\r\n");
+            XboxPath.ValidateFatxPath("Hdd1", operation.DestinationPath);
+            string source = PathSafety.ResolveInside(root, operation.SourcePath ?? ".");
+            ValidateCopiedPaths(source, operation.DestinationPath);
+
+            string? entryPoint = null;
             if (config.LaunchHomebrew?.Artifact.ID == id)
             {
                 if (string.IsNullOrWhiteSpace(entry.EntryPointRelativePath))
                     throw new InvalidOperationException("The selected default dashboard has no entry point.");
-                string entryPoint = PathSafety.NormalizeRelativePath(entry.EntryPointRelativePath);
+                entryPoint = PathSafety.NormalizeRelativePath(entry.EntryPointRelativePath);
                 FileServices.ValidateFatRelativePath(entryPoint);
-                string source = PathSafety.ResolveInside(root, operation.SourcePath ?? ".");
+                XboxPath.ValidateFatxPath("Hdd1", CombineDestination(operation.DestinationPath, entryPoint));
                 FileServices.EnsureFile(PathSafety.ResolveInside(source, entryPoint));
-                ini.Append(CultureInfo.InvariantCulture, $"DashXex = \"{entryPoint.Replace('/', '\\')}\"\r\n");
             }
+
+            ini.Append(CultureInfo.InvariantCulture, $"\r\n[BadBuilder-{id}]\r\nCategory = \"Homebrew\"\r\nName = \"{name}\"\r\nDescription = \"Installs {name}.\"\r\nSource = \"{id}\"\r\nDestination = \"{destination}\"\r\n");
+            if (entryPoint is not null)
+                ini.Append(CultureInfo.InvariantCulture, $"DashXex = \"{entryPoint.Replace('/', '\\')}\"\r\n");
 
             prepared[index] = (artifact with
             {
@@ -67,5 +74,34 @@ internal static class PeerPressureHomebrewService
                 InstallOperationKind.WriteFile, ExtrasIni, Contents: ini.ToString(), AllowedOverwritePaths: [ExtrasIni])]
         }, installerRoot);
         return prepared;
+    }
+
+    private static void ValidateCopiedPaths(string source, string destination)
+    {
+        if (!Directory.Exists(source))
+            throw new DirectoryNotFoundException($"Expected staged directory was not found: {source}");
+
+        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, directory).Replace(Path.DirectorySeparatorChar, '/');
+            XboxPath.ValidateFatxPath("Hdd1", CombineDestination(destination, relative));
+        }
+
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, file).Replace(Path.DirectorySeparatorChar, '/');
+            XboxPath.ValidateFatxPath("Hdd1", CombineDestination(destination, relative));
+        }
+    }
+
+    private static string CombineDestination(string destination, string relative)
+    {
+        string normalizedDestination = PathSafety.NormalizeRelativePath(destination);
+        string normalizedRelative = PathSafety.NormalizeRelativePath(relative);
+        if (normalizedDestination == ".")
+            return normalizedRelative;
+        return normalizedRelative == "."
+            ? normalizedDestination
+            : normalizedDestination + "/" + normalizedRelative;
     }
 }
