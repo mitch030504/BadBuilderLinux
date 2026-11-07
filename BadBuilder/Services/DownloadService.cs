@@ -17,6 +17,7 @@ internal sealed record UntrustedArtifact(
 internal static class DownloadService
 {
     private const long MaximumArchiveDownloadBytes = 16L * 1024 * 1024 * 1024;
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromMinutes(10);
     private static readonly HttpClient HttpClient = CreateHttpClient();
     private static readonly GitHubReleaseClient GitHubClient = new(HttpClient);
     private static readonly JsonSerializerOptions ManifestJsonOptions = new() { WriteIndented = true };
@@ -25,32 +26,76 @@ internal static class DownloadService
         IReadOnlyList<ArtifactDefinition> artifacts,
         string downloadRoot,
         CancellationToken cancellationToken,
-        Func<UntrustedArtifact, bool>? approveUntrusted = null)
+        Func<UntrustedArtifact, bool>? approveUntrusted = null,
+        Func<IReadOnlyList<ArchivePathEntry>, Dictionary<string, string>>? promptLocalArchives = null,
+        HttpClient? httpClient = null)
     {
         approveUntrusted ??= PromptForUntrustedArtifact;
+        promptLocalArchives ??= entries => Controls.PromptArchivePathOverrides(
+            "Required artifacts are unavailable online",
+            entries,
+            "Provide a local archive for every configured artifact. Nothing will be skipped.");
+        HttpClient client = httpClient ?? HttpClient;
+        GitHubReleaseClient githubClient = ReferenceEquals(client, HttpClient) ? GitHubClient : new(client);
+
         Directory.CreateDirectory(downloadRoot);
         Controls.WriteInfo("Resolving artifact releases.");
 
-        IReadOnlyList<ResolvedArtifact> resolved = await ResolveArtifactsAsync(artifacts, cancellationToken);
-        Dictionary<string, string> overrides = await CollectLocalOverridesAsync(resolved, downloadRoot, cancellationToken);
+        IReadOnlyList<ResolvedArtifact> resolved = await ResolveArtifactsAsync(artifacts, githubClient, cancellationToken);
+        HashSet<string> prompted = new(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> overrides = await CollectLocalOverridesAsync(
+            resolved, downloadRoot, promptLocalArchives, prompted, cancellationToken);
         List<DownloadPlan> plans = [];
 
         foreach (ResolvedArtifact item in resolved)
         {
             string? localOverride = overrides.GetValueOrDefault(item.Artifact.ID);
-            plans.Add(await CreatePlanAsync(item, downloadRoot, localOverride, cancellationToken));
+            try
+            {
+                plans.Add(await CreatePlanAsync(item, downloadRoot, localOverride, cancellationToken));
+            }
+            catch (Exception ex) when (IsRecoverableFailure(ex) && string.IsNullOrWhiteSpace(localOverride))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Controls.WriteWarning($"{item.Artifact.DisplayName} could not be prepared from the configured sources: {ex.Message}");
+                DownloadPlan? fallback = await PromptForLocalPlanAsync(
+                    item.Artifact, item.Reference, downloadRoot, promptLocalArchives, prompted, cancellationToken);
+                if (fallback is null)
+                    throw;
+                plans.Add(fallback);
+            }
         }
 
         int downloaded = 0;
-        foreach (DownloadPlan plan in plans)
+        for (int index = 0; index < plans.Count; index++)
         {
+            DownloadPlan plan = plans[index];
             cancellationToken.ThrowIfCancellationRequested();
-            if (plan.Action == PlanAction.Download)
+            bool countedAsDownload = plan.Action == PlanAction.Download;
+            if (countedAsDownload)
             {
                 Controls.WriteInfo($"Downloading {plan.Artifact.DisplayName}.");
                 downloaded++;
             }
-            await ExecutePlanAsync(plan, approveUntrusted, cancellationToken);
+
+            try
+            {
+                await ExecutePlanAsync(plan, client, approveUntrusted, cancellationToken);
+            }
+            catch (Exception ex) when (IsRecoverableFailure(ex) &&
+                                       string.IsNullOrWhiteSpace(plan.Artifact.LocalArchivePath))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Controls.WriteWarning($"{plan.Artifact.DisplayName} failed: {ex.Message}");
+                DownloadPlan? fallback = await PromptForLocalPlanAsync(
+                    plan.Artifact, plan.Reference, downloadRoot, promptLocalArchives, prompted, cancellationToken);
+                if (fallback is null)
+                    throw;
+                if (countedAsDownload)
+                    downloaded--;
+                plans[index] = fallback;
+                await ExecutePlanAsync(fallback, client, approveUntrusted, cancellationToken);
+            }
         }
 
         return new DownloadResult(
@@ -60,6 +105,7 @@ internal static class DownloadService
 
     private static async Task<IReadOnlyList<ResolvedArtifact>> ResolveArtifactsAsync(
         IReadOnlyList<ArtifactDefinition> artifacts,
+        GitHubReleaseClient githubClient,
         CancellationToken cancellationToken)
     {
         List<ResolvedArtifact> resolved = new(artifacts.Count);
@@ -73,10 +119,10 @@ internal static class DownloadService
 
             try
             {
-                ArtifactReference reference = await ResolveReferenceAsync(artifact, cancellationToken);
+                ArtifactReference reference = await ResolveReferenceAsync(artifact, githubClient, cancellationToken);
                 resolved.Add(new ResolvedArtifact(artifact, reference, null));
             }
-            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or TaskCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or InvalidDataException or TaskCanceledException or TimeoutException)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Controls.WriteWarning($"{artifact.DisplayName} could not be resolved online: {ex.Message}");
@@ -88,11 +134,12 @@ internal static class DownloadService
 
     private static async Task<ArtifactReference> ResolveReferenceAsync(
         ArtifactDefinition artifact,
+        GitHubReleaseClient githubClient,
         CancellationToken cancellationToken)
     {
         return artifact.Source switch
         {
-            GitHubReleaseSource source => await GitHubClient.ResolveAsync(artifact, source, cancellationToken),
+            GitHubReleaseSource source => await githubClient.ResolveAsync(artifact, source, cancellationToken),
             DirectSource source => ResolveDirectSource(artifact, source),
             null => throw new InvalidOperationException($"No source is configured for {artifact.DisplayName}."),
             _ => throw new InvalidOperationException($"Unsupported source type for {artifact.DisplayName}."),
@@ -120,6 +167,8 @@ internal static class DownloadService
     private static async Task<Dictionary<string, string>> CollectLocalOverridesAsync(
         IReadOnlyList<ResolvedArtifact> resolved,
         string downloadRoot,
+        Func<IReadOnlyList<ArchivePathEntry>, Dictionary<string, string>> promptLocalArchives,
+        HashSet<string> prompted,
         CancellationToken cancellationToken)
     {
         Dictionary<string, string> paths = resolved
@@ -140,20 +189,53 @@ internal static class DownloadService
         if (missing.Count == 0)
             return paths;
 
-        Dictionary<string, string> prompted = Controls.PromptArchivePathOverrides(
-            "Required artifacts are unavailable online",
-            missing,
-            "Provide a local archive for every configured artifact. Nothing will be skipped.");
-        foreach ((string id, string path) in prompted)
+        foreach (ArchivePathEntry entry in missing)
+            prompted.Add(entry.ArtifactID);
+
+        Dictionary<string, string> selected = promptLocalArchives(missing);
+        foreach ((string id, string path) in selected)
             paths[id] = Path.GetFullPath(FileServices.NormalizeUserPath(path));
         return paths;
     }
+
+    private static async Task<DownloadPlan?> PromptForLocalPlanAsync(
+        ArtifactDefinition artifact,
+        ArtifactReference? reference,
+        string downloadRoot,
+        Func<IReadOnlyList<ArchivePathEntry>, Dictionary<string, string>> promptLocalArchives,
+        HashSet<string> prompted,
+        CancellationToken cancellationToken)
+    {
+        if (!prompted.Add(artifact.ID))
+            return null;
+
+        Dictionary<string, string> selected = promptLocalArchives(
+            [new ArchivePathEntry(artifact.ID, artifact.DisplayName, null, Required: true)]);
+        if (!selected.TryGetValue(artifact.ID, out string? path) || string.IsNullOrWhiteSpace(path))
+            return null;
+
+        string localPath = Path.GetFullPath(FileServices.NormalizeUserPath(path));
+        ResolvedArtifact item = new(artifact, reference, null);
+        return await CreatePlanAsync(item, downloadRoot, localPath, cancellationToken, useManifestTrust: false);
+    }
+
+    private static bool IsRecoverableFailure(Exception exception) =>
+        exception is not OperationCanceledException &&
+        exception is InvalidOperationException
+            or InvalidDataException
+            or IOException
+            or HttpRequestException
+            or TimeoutException
+            or UnauthorizedAccessException
+            or NotSupportedException
+            or ArgumentException;
 
     private static async Task<DownloadPlan> CreatePlanAsync(
         ResolvedArtifact item,
         string downloadRoot,
         string? localOverride,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool useManifestTrust = true)
     {
         string artifactRoot = Path.Combine(downloadRoot, FileServices.ValidateIdentifier(item.Artifact.ID));
         Directory.CreateDirectory(artifactRoot);
@@ -163,7 +245,7 @@ internal static class DownloadService
         if (!string.IsNullOrWhiteSpace(localOverride))
         {
             FileServices.EnsureFile(localOverride);
-            return CreateExistingPlan(item, Path.GetFullPath(localOverride), manifestPath, manifest, PlanAction.Use);
+            return CreateExistingPlan(item, Path.GetFullPath(localOverride), manifestPath, manifest, PlanAction.Use, useManifestTrust);
         }
 
         if (item.Reference is null)
@@ -171,7 +253,7 @@ internal static class DownloadService
             string? cached = await GetCachedArchivePathAsync(item.Artifact, downloadRoot, cancellationToken);
             if (cached is null)
                 throw new InvalidOperationException($"No archive is available for required artifact {item.Artifact.DisplayName}.");
-            return CreateExistingPlan(item, cached, manifestPath, manifest, PlanAction.VerifyExisting);
+            return CreateExistingPlan(item, cached, manifestPath, manifest, PlanAction.VerifyExisting, useManifestTrust);
         }
 
         string safeName = Path.GetFileName(item.Reference.Name);
@@ -212,14 +294,20 @@ internal static class DownloadService
         string path,
         string manifestPath,
         DownloadManifest? manifest,
-        PlanAction defaultAction)
+        PlanAction defaultAction,
+        bool useManifestTrust = true)
     {
         ArtifactReference? reference = item.Reference;
         string actual = FileServices.ComputeSHA256(path);
-        string? expected = reference?.ExpectedSHA256 ?? item.Artifact.Source?.TrustedSHA256 ?? manifest?.TrustedSHA256;
+        string? expected = reference?.ExpectedSHA256 ?? item.Artifact.Source?.TrustedSHA256;
+        if (useManifestTrust)
+            expected ??= manifest?.TrustedSHA256;
         EnsureHashMatches(item.Artifact.DisplayName, actual, expected);
 
-        bool trusted = expected is not null;
+        bool manifestTrusted = !useManifestTrust &&
+            manifest?.TrustedSHA256 is string manifestHash &&
+            string.Equals(manifestHash, actual, StringComparison.OrdinalIgnoreCase);
+        bool trusted = expected is not null || manifestTrusted;
         bool approved = !trusted && manifest is not null &&
             string.Equals(Path.GetFullPath(manifest.ArchivePath), Path.GetFullPath(path), PathComparison) &&
             string.Equals(manifest.ApprovedSHA256, actual, StringComparison.OrdinalIgnoreCase);
@@ -230,11 +318,12 @@ internal static class DownloadService
         if (approved)
             action = PlanAction.Reuse;
 
-        return new DownloadPlan(item.Artifact, action, path, manifestPath, reference, manifest, changed);
+        return new DownloadPlan(item.Artifact, action, path, manifestPath, reference, manifest, changed, useManifestTrust);
     }
 
     private static async Task ExecutePlanAsync(
         DownloadPlan plan,
+        HttpClient httpClient,
         Func<UntrustedArtifact, bool> approveUntrusted,
         CancellationToken cancellationToken)
     {
@@ -249,7 +338,7 @@ internal static class DownloadService
             string partial = GetPartialPath(plan.Target);
             try
             {
-                actualHash = await DownloadToPartialAsync(HttpClient, reference, plan.Target, cancellationToken);
+                actualHash = await DownloadToPartialAsync(httpClient, reference, plan.Target, cancellationToken);
                 EnsureHashMatches(plan.Artifact.DisplayName, actualHash, reference.ExpectedSHA256);
 
                 if (reference.ExpectedSHA256 is null)
@@ -266,7 +355,9 @@ internal static class DownloadService
         else
         {
             actualHash = FileServices.ComputeSHA256(plan.Target);
-            string? expected = plan.Reference?.ExpectedSHA256 ?? plan.Artifact.Source?.TrustedSHA256 ?? plan.PreviousManifest?.TrustedSHA256;
+            string? expected = plan.Reference?.ExpectedSHA256
+                ?? plan.Artifact.Source?.TrustedSHA256
+                ?? GetManifestTrust(plan, actualHash);
             EnsureHashMatches(plan.Artifact.DisplayName, actualHash, expected);
             if (expected is null)
                 RequireUntrustedApproval(plan, actualHash, approveUntrusted);
@@ -279,18 +370,24 @@ internal static class DownloadService
         HttpClient httpClient,
         ArtifactReference reference,
         string target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? timeout = null)
     {
         string partial = GetPartialPath(target);
         if (File.Exists(partial))
             File.Delete(partial);
+
+        TimeSpan requestTimeout = timeout ?? DefaultRequestTimeout;
+        using CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(requestTimeout);
+        CancellationToken requestToken = timeoutSource.Token;
 
         try
         {
             using HttpResponseMessage response = await httpClient.GetAsync(
                 reference.DownloadUrl,
                 HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
+                requestToken);
             response.EnsureSuccessStatusCode();
 
             long? expectedLength = response.Content.Headers.ContentLength ?? reference.ContentLength;
@@ -298,7 +395,7 @@ internal static class DownloadService
                 throw new InvalidDataException($"The archive exceeds the {MaximumArchiveDownloadBytes} byte download limit.");
             long bytesWritten = 0;
             using IncrementalHash hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            await using Stream input = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using Stream input = await response.Content.ReadAsStreamAsync(requestToken);
             await using FileStream output = new(
                 partial,
                 FileMode.CreateNew,
@@ -310,26 +407,36 @@ internal static class DownloadService
             byte[] buffer = new byte[81920];
             while (true)
             {
-                int read = await input.ReadAsync(buffer, cancellationToken);
+                int read = await input.ReadAsync(buffer, requestToken);
                 if (read == 0)
                     break;
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                await output.WriteAsync(buffer.AsMemory(0, read), requestToken);
                 hasher.AppendData(buffer, 0, read);
                 bytesWritten += read;
                 if (bytesWritten > MaximumArchiveDownloadBytes)
                     throw new InvalidDataException($"The archive exceeded the {MaximumArchiveDownloadBytes} byte download limit.");
             }
-            await output.FlushAsync(cancellationToken);
+            await output.FlushAsync(requestToken);
 
             if (expectedLength is not null && bytesWritten != expectedLength.Value)
                 throw new InvalidDataException($"The download was truncated: expected {expectedLength.Value} bytes, received {bytesWritten}.");
 
             return Convert.ToHexString(hasher.GetHashAndReset());
         }
-        catch
+        catch (Exception ex)
         {
             if (File.Exists(partial))
                 File.Delete(partial);
+
+            if (ex is OperationCanceledException &&
+                !cancellationToken.IsCancellationRequested &&
+                timeoutSource.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"The download of {reference.Name} timed out after {requestTimeout}.",
+                    ex);
+            }
+
             throw;
         }
     }
@@ -376,6 +483,16 @@ internal static class DownloadService
         manifest is not null &&
         string.Equals(manifest.VersionTag, reference.VersionTag, StringComparison.Ordinal) &&
         string.Equals(manifest.AssetName, reference.Name, StringComparison.Ordinal);
+
+    private static string? GetManifestTrust(DownloadPlan plan, string actualHash)
+    {
+        string? previous = plan.PreviousManifest?.TrustedSHA256;
+        if (previous is null)
+            return null;
+        if (plan.UseManifestTrust || string.Equals(previous, actualHash, StringComparison.OrdinalIgnoreCase))
+            return previous;
+        return null;
+    }
 
     internal static async Task<string?> GetCachedArchivePathAsync(
         ArtifactDefinition artifact,
@@ -450,7 +567,7 @@ internal static class DownloadService
             AssetName = plan.Reference?.Name ?? Path.GetFileName(plan.Target),
             ArchivePath = plan.Target,
             TrustedSHA256 = plan.Reference is null
-                ? plan.Artifact.Source?.TrustedSHA256 ?? plan.PreviousManifest?.TrustedSHA256
+                ? plan.Artifact.Source?.TrustedSHA256 ?? GetManifestTrust(plan, actualHash)
                 : plan.Reference.ExpectedSHA256 ?? plan.Artifact.Source?.TrustedSHA256,
             ApprovedSHA256 = actualHash,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -477,7 +594,7 @@ internal static class DownloadService
 
     private static HttpClient CreateHttpClient()
     {
-        HttpClient client = new() { Timeout = TimeSpan.FromMinutes(10) };
+        HttpClient client = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("BadBuilder", "2"));
         return client;
     }
@@ -494,7 +611,8 @@ internal static class DownloadService
         string ManifestPath,
         ArtifactReference? Reference,
         DownloadManifest? PreviousManifest,
-        bool BytesChanged);
+        bool BytesChanged,
+        bool UseManifestTrust = true);
 
     private sealed class DownloadManifest
     {

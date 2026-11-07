@@ -8,12 +8,15 @@ namespace BadBuilder.Services;
 
 internal sealed class GitHubReleaseClient
 {
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromMinutes(10);
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _requestTimeout;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
-    internal GitHubReleaseClient(HttpClient httpClient)
+    internal GitHubReleaseClient(HttpClient httpClient, TimeSpan? requestTimeout = null)
     {
         _httpClient = httpClient;
+        _requestTimeout = requestTimeout ?? DefaultRequestTimeout;
         if (_httpClient.DefaultRequestHeaders.UserAgent.Count == 0)
             _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("BadBuilder", "2"));
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
@@ -120,18 +123,37 @@ internal sealed class GitHubReleaseClient
 
     private async Task<T> GetAsync<T>(string url, CancellationToken cancellationToken)
     {
-        using HttpResponseMessage response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new HttpRequestException(
-                $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase}) for release metadata.",
-                null,
-                response.StatusCode);
-        }
+        using CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(_requestTimeout);
+        CancellationToken requestToken = timeoutSource.Token;
 
-        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        return await JsonSerializer.DeserializeAsync<T>(stream, _jsonOptions, cancellationToken)
-            ?? throw new InvalidDataException("GitHub returned an empty release response.");
+        try
+        {
+            using HttpResponseMessage response = await _httpClient.GetAsync(
+                url,
+                HttpCompletionOption.ResponseHeadersRead,
+                requestToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"GitHub returned {(int)response.StatusCode} ({response.ReasonPhrase}) for release metadata.",
+                    null,
+                    response.StatusCode);
+            }
+
+            await using Stream stream = await response.Content.ReadAsStreamAsync(requestToken);
+            return await JsonSerializer.DeserializeAsync<T>(stream, _jsonOptions, requestToken)
+                ?? throw new InvalidDataException("GitHub returned an empty release response.");
+        }
+        catch (Exception ex) when (
+            ex is OperationCanceledException &&
+            !cancellationToken.IsCancellationRequested &&
+            timeoutSource.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"GitHub release metadata request timed out after {_requestTimeout}.",
+                ex);
+        }
     }
 }
 
