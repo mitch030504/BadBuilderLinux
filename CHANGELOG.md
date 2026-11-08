@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## [2.5.0](https://github.com/mitch030504/BadBuilderLinux/releases/tag/v2.5.0) — 2026-11-08
+
+**Breaking:** the Linux binary must be installed root-owned, and sudo must be
+granted to that path. The privileged helper refuses to run from a directory the
+calling user can modify. See the README "Sudo rule" section.
 
 ### Security
 

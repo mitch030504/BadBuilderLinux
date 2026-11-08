@@ -4,7 +4,7 @@ Prepare an Xbox 360 USB with BadUpdate, ABadAvatar, or the Peer Pressure softmod
 
 This is a Linux-first fork of [Pdawg-bytes/BadBuilder](https://github.com/Pdawg-bytes/BadBuilder), with self-contained Linux and Windows x64 builds. The executable and .NET project retain the `BadBuilder` name. Linux is tested primarily on CachyOS/Arch and targets mainstream systemd desktops; macOS is unsupported.
 
-**New in v2.4.1:** preflight and recovery hardening across disk selection, FAT32 capacity planning, launch.ini setup, Peer Pressure FATX paths, downloads, and USB cleanup. See the [changelog](CHANGELOG.md) for release history.
+**New in v2.5.0:** a full-audit security release. Every built-in artifact is pinned to an exact tag, hash, and size; disk eligibility and protected paths are fail-closed; the target is formatted through an exclusive handle; copy success is verified and flushed; and the privileged helper refuses to run from a caller-writable location. **Linux users must install the binary root-owned** — see below. See the [changelog](CHANGELOG.md) for release history.
 
 > [!CAUTION]
 > Preparing a USB erases the entire selected disk. Check its device path, model, size, and serial before confirming. Save any console backups elsewhere before reusing an installer USB.
@@ -15,7 +15,7 @@ Get the binaries and `SHA256SUMS` from the [latest release](https://github.com/m
 
 | Platform | Download | Launch |
 | --- | --- | --- |
-| Linux x64 | `BadBuilder-linux-x64` | Make executable and run as your desktop user |
+| Linux x64 | `BadBuilder-linux-x64` | Install root-owned, then run as your desktop user |
 | Windows x64 | `BadBuilder-win-x64.exe` | Launch and accept the administrator prompt |
 
 On Linux, download the Linux binary and `SHA256SUMS` into the same directory, verify it, then install it to a root-owned location. The privileged helper refuses to run from a directory the calling user can modify, because sudo would otherwise execute a replaceable binary as root.
@@ -41,6 +41,13 @@ youruser ALL=(root) NOPASSWD: /usr/local/bin/badbuilder --disk-helper *
 ```
 
 The helper independently validates the caller UID and GID, the device, its fingerprint, the per-device lease, and the mount path. It also refuses to run when its own executable or directory is writable by the calling user. Never point a sudoers rule at a binary in your home directory or in `~/Downloads`.
+
+### Upgrading from 2.4.x
+
+- Move the binary out of your home directory and install it root-owned (command above).
+- Add the sudoers rule if you have not already. Without it, USB preparation fails with a permission error.
+- `wipefs` and `blockdev` are no longer required; `sudo`, `lsblk`, `findmnt`, `mount`, `umount`, and `sync` are.
+- A cached artifact whose upstream release changed will now fail its pinned hash instead of silently downloading new bytes. Delete the affected cache entry or wait for a catalog update.
 
 ## Choose a workflow
 
