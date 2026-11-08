@@ -143,8 +143,6 @@ internal static partial class BuilderApp
         }
 
         string? runRoot = null;
-        PreparedTarget? preparedTarget = null;
-        IDisposable? cancellationBlock = null;
         bool copiedSuccessfully = false;
         bool finalizedSuccessfully = true;
         bool failureNeedsPause = false;
@@ -229,52 +227,40 @@ internal static partial class BuilderApp
             ];
 
             InstallPlan installPlan = InstallService.BuildPlan(staged, extraOperations, selected.Size);
-            selected = await DiskService.RevalidateAsync(selected.Identity, cancellationToken);
-            Config.TargetDisk = selected;
+            InstallCoordinator coordinator = new(
+                DiskService.Backend,
+                ConsoleUserInterface.Instance,
+                FilePendingCleanupStore.Instance);
+            InstallExecutionResult execution = await coordinator.ExecuteAsync(
+                selected,
+                installPlan,
+                cancellationToken);
+            Config.TargetDisk = execution.RevalidatedDisk;
 
-            Controls.PadLine();
-            Controls.WriteWarning("The next step permanently erases the selected disk.");
-            Controls.WriteInfo($"Device: {selected.DevicePath}");
-            Controls.WriteInfo($"Model: {selected.Name}");
-            Controls.WriteInfo($"Size: {selected.Size / 1024d / 1024d / 1024d:0.00} GiB");
-            Controls.WriteInfo($"Serial/WWN: {selected.Serial ?? selected.Wwn ?? "not reported"}");
-            string confirmation = Controls.PromptText($"Type the exact device path '{selected.DevicePath}' to continue");
-            StringComparison comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-            if (!string.Equals(confirmation, selected.DevicePath, comparison))
+            if (execution.CancelledBeforePrepare)
             {
-                Controls.WriteWarning("Device-path confirmation did not match. Nothing was formatted.");
+                Controls.WriteWarning(
+                    "Installation was cancelled before disk preparation. The selected disk was not formatted.");
                 Controls.Pause();
                 return;
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-            Controls.WriteWarning("Disk preparation has started. Ctrl+C cancellation is disabled until cleanup finishes.");
-            cancellationBlock = CancellationGate.Block();
-            preparedTarget = await DiskService.PrepareAsync(selected.Identity, CancellationToken.None);
-            if (preparedTarget.RequiresFinalize)
+            if (execution.Error is not null)
             {
-                try
-                {
-                    PendingCleanupStore.Save(preparedTarget);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    DiagnosticLog.Error(ex, "Could not save the pending USB cleanup record.");
-                    Controls.WriteWarning(
-                        "The pending USB cleanup record could not be saved. If cleanup fails, the USB may remain mounted.");
-                }
+                DiagnosticLog.Error(execution.Error, "Handled installation failure.");
+                Controls.WriteError(execution.FormatCompleted
+                    ? $"The USB was formatted, but copying failed: {execution.Error.Message}"
+                    : $"Installation failed: {execution.Error.Message}");
+                failureNeedsPause = true;
             }
 
-            Controls.WriteInfo("Copying the fully validated installation plan.");
-            await InstallService.ExecuteAsync(installPlan, preparedTarget.MountRoot, CancellationToken.None);
-
-            copiedSuccessfully = true;
+            copiedSuccessfully = execution.CopiedSuccessfully;
+            finalizedSuccessfully = execution.FinalizedSuccessfully;
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && preparedTarget is null)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            Controls.WriteWarning("Installation was cancelled before disk preparation. The selected disk was not formatted.");
+            Controls.WriteWarning(
+                "Installation was cancelled before disk preparation. The selected disk was not formatted.");
             Controls.Pause();
         }
         catch (Exception ex)
@@ -285,60 +271,16 @@ internal static partial class BuilderApp
         }
         finally
         {
-            try
+            if (runRoot is not null)
             {
-                if (preparedTarget?.RequiresFinalize == true)
+                try
                 {
-                    try
-                    {
-                        FinalizeResult result = await DiskService.FinalizeAsync(preparedTarget, CancellationToken.None);
-                        finalizedSuccessfully = result.Success;
-                        if (result.Success)
-                        {
-                            try
-                            {
-                                PendingCleanupStore.Clear();
-                            }
-                            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                            {
-                                DiagnosticLog.Error(ex, "Could not clear the pending USB cleanup record.");
-                                Controls.WriteWarning(
-                                    "The USB was cleaned up, but the pending cleanup record could not be removed. Retry cleanup to clear it.");
-                            }
-                        }
-                        else
-                        {
-                            string message = result.Error ?? "USB cleanup failed.";
-                            Controls.WriteWarning(result.StillMounted
-                                ? $"{message} The USB remains mounted at {preparedTarget.MountRoot}."
-                                : message);
-                            DiagnosticLog.Info($"USB finalization failed: {message}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        finalizedSuccessfully = false;
-                        DiagnosticLog.Error(ex, "Unexpected USB finalization failure.");
-                        Controls.WriteWarning(
-                            $"USB cleanup failed unexpectedly. Treat the USB as still mounted at {preparedTarget.MountRoot} and close programs using it before retrying.");
-                    }
+                    AppPaths.DeleteRunRoot(runRoot);
                 }
-            }
-            finally
-            {
-                if (runRoot is not null)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
                 {
-                    try
-                    {
-                        AppPaths.DeleteRunRoot(runRoot);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-                    {
-                        DiagnosticLog.Error(ex, "Could not remove transient staging data.");
-                    }
+                    DiagnosticLog.Error(ex, "Could not remove transient staging data.");
                 }
-
-                cancellationBlock?.Dispose();
             }
         }
 

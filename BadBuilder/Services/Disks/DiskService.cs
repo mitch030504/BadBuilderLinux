@@ -102,18 +102,31 @@ internal sealed class DiskSafetyException(string message) : IOException(message)
 internal static class DiskService
 {
     private static readonly Lazy<IDiskBackend> PlatformBackend = new(CreatePlatformBackend);
+    private static IDiskBackend? _override;
+
+    /// <summary>
+    /// The backend used by every disk operation. Tests replace this with a fake
+    /// so the destructive flow can be exercised without touching hardware.
+    /// </summary>
+    internal static IDiskBackend Backend
+    {
+        get => _override ?? PlatformBackend.Value;
+        set => _override = value;
+    }
+
+    internal static void ResetBackend() => _override = null;
 
     internal static Task<IReadOnlyList<DiskInfo>> EnumerateDisksAsync(CancellationToken cancellationToken) =>
-        PlatformBackend.Value.EnumerateAsync(cancellationToken);
+        Backend.EnumerateAsync(cancellationToken);
 
     internal static Task<DiskInfo> RevalidateAsync(DiskIdentity selected, CancellationToken cancellationToken) =>
-        PlatformBackend.Value.RevalidateAsync(selected, cancellationToken);
+        Backend.RevalidateAsync(selected, cancellationToken);
 
     internal static Task<PreparedTarget> PrepareAsync(DiskIdentity selected, CancellationToken cancellationToken) =>
-        PlatformBackend.Value.PrepareAsync(selected, cancellationToken);
+        Backend.PrepareAsync(selected, cancellationToken);
 
     internal static Task<FinalizeResult> FinalizeAsync(PreparedTarget target, CancellationToken cancellationToken) =>
-        PlatformBackend.Value.FinalizeAsync(target, cancellationToken);
+        Backend.FinalizeAsync(target, cancellationToken);
 
     private static IDiskBackend CreatePlatformBackend()
     {
