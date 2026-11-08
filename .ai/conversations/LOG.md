@@ -21,3 +21,10 @@
 **Files:** `BadBuilder/`, `BadBuilder.Tests/`, `.github/workflows/`, `scripts/`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, `global.json`, `NuGet.config`, `packages.lock.json`
 **Branch:** `audit/full-sweep` (8 commits, not merged)
 **Next:** Hardware validation on a disposable USB stick; decide whether this ships as 2.5.0 because the Linux install workflow changed.
+
+---
+## 2026-11-08 12:50 CET — OpenCode (DeepSeek V4.1 Flash) #release
+**Task:** Prepare and publish BadBuilderLinux v2.5.0.
+**Outcome:** Bumped to 2.5.0, added release notes, moved the changelog entry, documented the root-owned Linux install and sudoers rule, fixed three Windows-only test assumptions, and made the pinned-archive check retry on CDN timeouts. Merged to `main` and published `v2.5.0` at `5157d95`. Assets verified against `SHA256SUMS` and GitHub asset digests.
+**Files:** `BadBuilder/BadBuilder.csproj`, `.github/release-notes/v2.5.0.md`, `CHANGELOG.md`, `README.md`, `BadBuilder.Tests/`, `scripts/verify_xeunshackle_max_release.py`
+**Next:** Hardware validation on a disposable USB stick on Linux and Windows.

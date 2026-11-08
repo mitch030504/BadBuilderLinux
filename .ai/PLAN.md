@@ -1,8 +1,8 @@
 # Current Plan
 
 ## Active Work
-Full audit remediation is complete on branch `audit/full-sweep` (8 commits on
-top of `main` at `3bc4d0a`). The branch is **not merged** and **not released**.
+None. **BadBuilderLinux v2.5.0** was released on 2026-11-08 from `main` at
+`5157d95`; the working tree is clean and no feature branch is active.
 
 ## Task Status
 | Task | Status | Agent | Date |
@@ -17,13 +17,11 @@ top of `main` at `3bc4d0a`). The branch is **not merged** and **not released**.
 | Phase 7 — CI pinning, lock files, release guards | done | OpenCode (DeepSeek V4.1 Flash) | 2026-11-08 |
 | Phase 8 — README and CHANGELOG | done | OpenCode (DeepSeek V4.1 Flash) | 2026-11-08 |
 | Hardware validation on a disposable USB | pending | — | — |
-| Merge `audit/full-sweep` and release | pending | — | — |
+| Merge `audit/full-sweep` and release v2.5.0 | done | OpenCode (DeepSeek V4.1 Flash) | 2026-11-08 |
 
 ## Blockers
-- Physical USB and Windows runtime behaviour cannot be verified in this
-  environment. The disk, copy, and helper changes are code-verified only.
-- The Linux install workflow changed (root-owned binary + sudoers rule). That
-  needs a deliberate release decision.
+- None for release. Physical USB and Windows runtime behaviour remain manual
+  checks and are the only outstanding validation.
 
 ## Key Decisions
 - Trust comes only from the compiled artifact catalog; the GitHub asset digest
@@ -39,7 +37,5 @@ top of `main` at `3bc4d0a`). The branch is **not merged** and **not released**.
 ## Next
 1. Run the hardware validation checklist on a disposable USB stick on Linux and
    Windows.
-2. Review the branch, then merge to `main`.
-3. Decide the version: the Linux install change is breaking, so 2.5.0 is the
-   likely choice. Add `.github/release-notes/v2.5.0.md` and bump
-   `VersionPrefix`.
+2. Start from a user request or a new audit; update this file and `HANDOFF.md`
+   when work begins.

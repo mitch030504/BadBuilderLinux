@@ -20,7 +20,7 @@
 - `scripts/verify_xeunshackle_max_release.py` — pinned upstream ZIP verification
 
 ## Tests
-- `BadBuilder.Tests/` — xUnit suite (`202` tests on `audit/full-sweep`; `135` at v2.4.1)
+- `BadBuilder.Tests/` — xUnit suite (`202` tests at v2.5.0; `135` at v2.4.1)
 - `BadBuilder.Tests/InstallCoordinatorTests.cs` — destructive sequence, confirmation, cancellation, cleanup handling
 - `BadBuilder.Tests/InstallExecutionTests.cs` — mount-point checks, source-size changes, exact-byte writes
 - `BadBuilder.Tests/DiskFormatterTests.cs` — GPT erasure, FAT32 geometry boundaries, exclusive open
@@ -40,7 +40,7 @@
 - `README.md` — user workflows, safety, build/test/release instructions
 - `CHANGELOG.md` — release history and validation notes
 - `SECURITY.md` — private vulnerability reporting and scope
-- `.github/release-notes/v2.4.1.md` — current published release notes
+- `.github/release-notes/v2.5.0.md` — current published release notes
 
 ### CI/CD and Verification
 - `.github/workflows/ci.yml` — restore, dependency audit, pinned archive check, build, tests, publish, smoke
@@ -65,6 +65,7 @@ No formal `specs/`, `rfcs/`, `adrs/`, or `docs/` directory is present. Work is t
 
 ## Historical Release Notes
 Reference only; not authoritative for current behavior:
+- `.github/release-notes/v2.4.1.md`
 - `.github/release-notes/v2.2.1.md`
 - `.github/release-notes/v2.3.0.md`
 - `.github/release-notes/v2.3.1.md`

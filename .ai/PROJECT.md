@@ -25,7 +25,7 @@ BadBuilderLinux is a Linux-first fork of Pdawg-bytes/BadBuilder. It prepares an 
 |----------|------|---------|
 | README | `README.md` | User workflows, safety notes, build/test/release instructions |
 | Changelog | `CHANGELOG.md` | Release history and validation notes |
-| Current release notes | `.github/release-notes/v2.4.1.md` | Published v2.4.1 changes and limits |
+| Current release notes | `.github/release-notes/v2.5.0.md` | Published v2.5.0 changes and the Linux upgrade note |
 | CI workflow | `.github/workflows/ci.yml` | Restore, audit, build, test, publish, smoke |
 | Release workflow | `.github/workflows/release.yml` | Version/tag detection, builds, GitHub release publication |
 | Pinned archive check | `scripts/verify_xeunshackle_max_release.py` | Verifies the pinned XeUnshackle Max ZIP |
@@ -54,4 +54,4 @@ BadBuilderLinux is a Linux-first fork of Pdawg-bytes/BadBuilder. It prepares an 
 2. Add `.github/release-notes/vX.Y.Z.md`.
 3. Update `CHANGELOG.md` and `README.md` as needed.
 4. Push to `main` or dispatch `.github/workflows/release.yml`.
-5. The workflow builds/tests both platforms, validates executable versions, and publishes the tagged GitHub release with `BadBuilder-linux-x64`, `BadBuilder-win-x64.exe`, and `SHA256SUMS`.
+5. The workflow builds/tests both platforms, validates executable versions and the pinned archive, attests build provenance, and publishes the tagged GitHub release with `BadBuilder-linux-x64`, `BadBuilder-win-x64.exe`, and `SHA256SUMS`. Releases are created as drafts and published after upload.

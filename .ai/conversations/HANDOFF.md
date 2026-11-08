@@ -1,38 +1,42 @@
 # Agent Handoff
-Last updated: 2026-11-08 12:03 CET by OpenCode (DeepSeek V4.1 Flash)
+Last updated: 2026-11-08 12:50 CET by OpenCode (DeepSeek V4.1 Flash)
 
 ## Active Work
-- Branch `audit/full-sweep`, 8 commits on top of `main` at `3bc4d0a`. **Not merged.**
-- The branch contains the full audit remediation described in
-  `.ai/conversations/decisions/2026-11-08-trust-anchors-and-disk-identity.md`
-  and `.ai/conversations/sessions/2026-11-08/120305-opencode-full-audit-remediation.md`.
+- None. **BadBuilderLinux v2.5.0** was released on 2026-11-08 from `main` at
+  `5157d95`; the working tree is clean and no feature branch is active.
 
 ## Recent Completions
-- [2026-11-08 OpenCode] Full audit (10 subagents) and remediation sweep. 202 tests pass, warning-free build, linux-x64 single-file publish verified. #audit #security #bugfix
+- [2026-11-08 OpenCode] Released v2.5.0: full audit remediation, root-owned
+  Linux install, artifact pinning, exclusive-handle formatting, copy
+  verification, helper hardening, CI pinning. #release #security #bugfix
+- [2026-11-08 OpenCode] Full audit (10 subagents) and eight-phase remediation. #audit
 - [2026-11-08 OpenCode] Bootstrapped `.ai/` handoff context. #setup
-- [2026-11-07 OpenCode] Fixed all 12 audit findings and released v2.4.1. #bugfix #deploy
 
 ## Pending Decisions
-- **Release version.** The Linux install workflow changed: the binary must be
-  installed root-owned and sudo must be granted to that path. That is a breaking
-  change, so this likely ships as 2.5.0 rather than 2.4.2.
-- **Hardware validation.** Phases 3–5 change disk behaviour that cannot be
-  exercised here. A disposable USB stick is required before release.
+- **Hardware validation.** Physical USB behaviour, Windows runtime behaviour,
+  and the sudoers boundary are still manual checks. Run the hardware checklist
+  before relying on v2.5.0 for a real console.
 
 ## Key Context
-- `main` is at `3bc4d0a`; `audit/full-sweep` is 8 commits ahead.
-- Test suite: **202 passed** (was 135). `dotnet restore --locked-mode` works.
-- Linux now requires a root-owned install and a sudoers rule; see README
-  "Sudo rule". Running the downloaded binary from `~/Downloads` will make the
-  helper refuse to run, by design.
-- `wipefs` and `blockdev` are no longer required. Required commands are
-  `sudo`, `lsblk`, `findmnt`, `mount`, `umount`, `sync`, optional `udevadm`.
+- Current version: `2.5.0`; tag `v2.5.0`; release:
+  https://github.com/mitch030504/BadBuilderLinux/releases/tag/v2.5.0
+- Tag `v2.5.0` points at `5157d95`. `main` is at the same commit.
+- Test suite: **202 passed** on Linux and Windows CI.
+- Release assets verified: `SHA256SUMS` matches the GitHub asset digests
+  (linux `42f99117…`, windows `be0247f2…`).
+- **Breaking change:** Linux users must install the binary root-owned and grant
+  sudo to that path. The helper refuses to run from a caller-writable
+  directory. See README "Sudo rule" and "Upgrading from 2.4.x".
+- `wipefs` and `blockdev` are no longer required. Required commands: `sudo`,
+  `lsblk`, `findmnt`, `mount`, `umount`, `sync`; optional `udevadm`.
 - Every built-in artifact has an exact tag, literal SHA-256, and size. Updating
   an upstream artifact now requires editing the catalog deliberately.
-- The destructive sequence lives in `Application/InstallCoordinator.cs`, not
-  `BuilderApp`. Add safety tests there, not against the static UI.
+- The destructive sequence lives in `Application/InstallCoordinator.cs`.
 - Deliberately unchanged: MBR alignment at LBA 63 (Xbox compatibility), LVM
   multi-PV protection, and quoting of `launch.ini` values.
 - Release process: bump `VersionPrefix`, add `.github/release-notes/vX.Y.Z.md`,
-  update `CHANGELOG.md`/`README.md`, merge to `main` or dispatch `release.yml`
-  from `main`. Releases are created as drafts and published after upload.
+  update `CHANGELOG.md`/`README.md`, merge to `main`, then either push the
+  csproj change or dispatch `release.yml` from `main`. Releases are created as
+  drafts and published after upload.
+- The pinned-archive check retries three times; a CDN timeout no longer fails
+  a release.
