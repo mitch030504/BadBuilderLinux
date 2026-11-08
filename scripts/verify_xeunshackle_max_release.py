@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the exact upstream XeUnshackle Max ZIP without extracting or flashing it."""
 
+import time
 from hashlib import sha256
 from io import BytesIO
 from urllib.request import Request, urlopen
@@ -12,9 +13,30 @@ URL = (
 )
 EXPECTED_SHA256 = "838cf16450790601158265c22c84d90c1f9ffff7ba07854b9781722dba2328e4"
 EXPECTED_SIZE_LIMIT = 32 * 1024 * 1024
+ATTEMPTS = 3
+TIMEOUT_SECONDS = 120
 
-with urlopen(Request(URL, headers={"User-Agent": "BadBuilderLinux-CI"}), timeout=60) as reply:
-    payload = reply.read(EXPECTED_SIZE_LIMIT + 1)
+
+def download() -> bytes:
+    """Download with retries so a transient CDN timeout does not fail a release."""
+    last_error: Exception | None = None
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            request = Request(URL, headers={"User-Agent": "BadBuilderLinux-CI"})
+            with urlopen(request, timeout=TIMEOUT_SECONDS) as reply:
+                if reply.geturl().split(":", 1)[0].lower() != "https":
+                    raise SystemExit(f"Refusing a non-HTTPS download: {reply.geturl()}")
+                return reply.read(EXPECTED_SIZE_LIMIT + 1)
+        except OSError as error:
+            last_error = error
+            if attempt < ATTEMPTS:
+                time.sleep(5 * attempt)
+    raise SystemExit(
+        f"Could not download the pinned archive after {ATTEMPTS} attempts: {last_error}"
+    )
+
+
+payload = download()
 
 if len(payload) > EXPECTED_SIZE_LIMIT:
     raise SystemExit("XeUnshackle Max archive exceeds the expected download-size limit")
