@@ -138,6 +138,57 @@ public sealed class ArchiveAndPathTests
 
     private static ArchiveExtractionLimits Limits() => new(100, 1024 * 1024, 1024 * 1024, 1024 * 1024);
 
+    [Theory]
+    [InlineData("CON.tar.gz")]
+    [InlineData("NUL.txt")]
+    [InlineData("CLOCK$")]
+    [InlineData("com1.log")]
+    public void ValidateFatRelativePath_RejectsReservedDeviceNames(string name)
+    {
+        Assert.Throws<InvalidDataException>(() => FileServices.ValidateFatRelativePath(name));
+    }
+
+    [Fact]
+    public void ValidateFatRelativePath_RejectsOverlongPath()
+    {
+        string path = string.Join('/', Enumerable.Repeat("abcdefghij", 30));
+
+        Assert.Throws<InvalidDataException>(() => FileServices.ValidateFatRelativePath(path));
+    }
+
+    [Fact]
+    public void SanitizeFatName_RechecksReservedNameAfterTruncation()
+    {
+        string name = "CON" + new string(' ', 117) + "X";
+
+        Assert.Equal("_CON", FileServices.SanitizeFatName(name));
+    }
+
+    [Fact]
+    public void SanitizeFatName_ReplacesIniCommentCharacters()
+    {
+        Assert.Equal("My_App", FileServices.SanitizeFatName("My;App"));
+        Assert.Equal("My_App", FileServices.SanitizeFatName("My#App"));
+    }
+
+    [Fact]
+    public async Task ValidateLayout_RejectsTopLevelFileAlongsideSingleDirectory()
+    {
+        using TemporaryDirectory temporary = new();
+        string staging = Path.Combine(temporary.Path, "staging");
+        Directory.CreateDirectory(Path.Combine(staging, "Payload"));
+        await File.WriteAllTextAsync(Path.Combine(staging, "launch.ini"), "x");
+        ArtifactDefinition artifact = new(
+            "artifact",
+            "Artifact",
+            "Test",
+            string.Empty,
+            null,
+            Layout: new ArchiveLayout(RequireSingleTopLevelDirectory: true));
+
+        Assert.Throws<InvalidDataException>(() => ArchiveService.ValidateLayout(artifact, staging));
+    }
+
     private static string CreateZip(string root, params (string Path, string Contents)[] files)
     {
         string path = System.IO.Path.Combine(root, $"fixture-{Guid.NewGuid():N}.zip");

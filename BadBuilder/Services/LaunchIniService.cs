@@ -8,7 +8,7 @@ internal static class LaunchIniService
     private static readonly StringComparer StagedPathComparer =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    internal static void ValidateStagedEntryPoint(
+    internal static string ValidateStagedEntryPoint(
         IReadOnlyList<(ArtifactDefinition Artifact, string StagingPath)> staged,
         HomebrewEntry launchHomebrew)
     {
@@ -41,7 +41,15 @@ internal static class LaunchIniService
         string entryPoint = PathSafety.NormalizeRelativePath(launchHomebrew.EntryPointRelativePath);
         FileServices.ValidateFatRelativePath(entryPoint);
         FileServices.EnsureFile(PathSafety.ResolveInside(source, entryPoint));
-        FileServices.ValidateFatRelativePath($"{copyOperation.DestinationPath}/{entryPoint}");
+
+        // The launch path must be the path the plan will actually install to,
+        // not a name derived from the display name.
+        string destination = PathSafety.NormalizeRelativePath(copyOperation.DestinationPath);
+        string destinationEntryPoint = destination == "."
+            ? entryPoint
+            : $"{destination}/{entryPoint}";
+        FileServices.ValidateFatRelativePath(destinationEntryPoint);
+        return destinationEntryPoint;
     }
 
     internal static string? FindStagedLaunchIni(
@@ -104,7 +112,13 @@ internal static class LaunchIniService
         string defaultXboxPath,
         CancellationToken cancellationToken)
     {
-        ValidateStagedEntryPoint(staged, launchHomebrew);
+        string validated = ValidateStagedEntryPoint(staged, launchHomebrew);
+        string expectedSuffix = validated.Replace('/', '\\');
+        if (!defaultXboxPath.EndsWith(expectedSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"The launch path {defaultXboxPath} does not match the planned install path {validated}.");
+        }
 
         string? iniPath = FindStagedLaunchIni(staged, bootstrapArtifactId);
         if (iniPath is null)
@@ -118,6 +132,7 @@ internal static class LaunchIniService
         string defaultXboxPath,
         CancellationToken cancellationToken)
     {
+        ValidateDefaultPath(defaultXboxPath);
         if (!File.Exists(path))
             return false;
 
@@ -133,19 +148,22 @@ internal static class LaunchIniService
         for (int index = 0; index < lines.Count; index++)
         {
             string trimmed = lines[index].Trim();
-            if (trimmed.Equals("[Paths]", StringComparison.OrdinalIgnoreCase))
+            if (!trimmed.Equals("[Paths]", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (pathsStart >= 0)
+                throw new InvalidDataException("launch.ini contains more than one [Paths] section.");
+
+            pathsStart = index;
+            pathsEnd = lines.Count;
+            for (int next = index + 1; next < lines.Count; next++)
             {
-                pathsStart = index;
-                for (int next = index + 1; next < lines.Count; next++)
+                string candidate = lines[next].Trim();
+                if (candidate.Length >= 2 && candidate[0] == '[' && candidate[^1] == ']')
                 {
-                    string candidate = lines[next].Trim();
-                    if (candidate.Length >= 2 && candidate[0] == '[' && candidate[^1] == ']')
-                    {
-                        pathsEnd = next;
-                        break;
-                    }
+                    pathsEnd = next;
+                    break;
                 }
-                break;
             }
         }
 
@@ -167,8 +185,9 @@ internal static class LaunchIniService
                 int equals = trimmed.IndexOf('=');
                 if (equals >= 0 && trimmed[..equals].Trim().Equals("Default", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (defaultLine >= 0)
+                        throw new InvalidDataException("launch.ini contains more than one Default entry in [Paths].");
                     defaultLine = index;
-                    break;
                 }
             }
 
@@ -194,6 +213,16 @@ internal static class LaunchIniService
         body.CopyTo(output, preamble.Length);
         await File.WriteAllBytesAsync(path, output, cancellationToken);
         return true;
+    }
+
+    private static void ValidateDefaultPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) ||
+            path.Any(character => character < 32 || character is '"' or ';' or '#' or '='))
+        {
+            throw new InvalidDataException(
+                $"The launch path contains characters that cannot be written safely to launch.ini: {path}");
+        }
     }
 
     private static (Encoding Encoding, int PreambleLength) DetectEncoding(byte[] bytes)

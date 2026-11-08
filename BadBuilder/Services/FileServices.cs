@@ -6,10 +6,19 @@ internal static class FileServices
 {
     private static readonly HashSet<string> ReservedFatNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "CON", "PRN", "AUX", "NUL",
+        "CON", "PRN", "AUX", "NUL", "CLOCK$",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     };
+
+    private static bool IsReservedName(string component)
+    {
+        // Windows treats CON.tar.gz as the CON device: the stem is everything
+        // before the first dot, not the last.
+        int dot = component.IndexOf('.');
+        string stem = dot >= 0 ? component[..dot] : component;
+        return ReservedFatNames.Contains(stem);
+    }
 
     internal static string ComputeSHA256(string filePath)
     {
@@ -40,26 +49,35 @@ internal static class FileServices
     internal static string SanitizeFatName(string value)
     {
         string sanitized = new(value.Trim().Select(character =>
-            character < 32 || character is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*'
+            character < 32 || character is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*' or ';' or '#'
                 ? '_'
                 : character).ToArray());
         sanitized = sanitized.TrimEnd(' ', '.');
         if (string.IsNullOrWhiteSpace(sanitized))
             throw new InvalidDataException("The name contains no FAT-compatible characters.");
-        if (ReservedFatNames.Contains(Path.GetFileNameWithoutExtension(sanitized)))
+        if (IsReservedName(sanitized))
             sanitized = "_" + sanitized;
-        return sanitized.Length <= 120 ? sanitized : sanitized[..120].TrimEnd(' ', '.');
+        if (sanitized.Length > 120)
+            sanitized = sanitized[..120].TrimEnd(' ', '.');
+        // Truncation can turn a longer name into a reserved one.
+        if (IsReservedName(sanitized))
+            sanitized = "_" + sanitized[..Math.Min(sanitized.Length, 119)];
+        return sanitized;
     }
 
     internal static void ValidateFatRelativePath(string relativePath)
     {
-        foreach (string component in PathSafety.NormalizeRelativePath(relativePath).Split('/'))
+        string normalized = PathSafety.NormalizeRelativePath(relativePath);
+        if (normalized.Length > 255)
+            throw new InvalidDataException($"Path is too long for FAT32: {relativePath}");
+
+        foreach (string component in normalized.Split('/'))
         {
             if (component == ".")
                 continue;
             if (component.Length > 255 || component.EndsWith(' ') || component.EndsWith('.') ||
                 component.Any(character => character < 32 || character is '<' or '>' or ':' or '"' or '|' or '?' or '*') ||
-                ReservedFatNames.Contains(Path.GetFileNameWithoutExtension(component)))
+                IsReservedName(component))
             {
                 throw new InvalidDataException($"Path is not valid on FAT32: {relativePath}");
             }

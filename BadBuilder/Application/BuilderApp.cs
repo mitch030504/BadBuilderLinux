@@ -194,12 +194,8 @@ internal static partial class BuilderApp
 
             if (!Config.FirmwareUpdateEnabled && !Config.IsPeerPressureInstall && Config.LaunchHomebrew is not null)
             {
-                string appName = FileServices.SanitizeFatName(Config.LaunchHomebrew.Artifact.DisplayName);
-                string xboxPath = XboxPath.Combine(
-                    "Usb",
-                    "Apps",
-                    appName,
-                    Config.LaunchHomebrew.EntryPointRelativePath!);
+                string relativeLaunchPath = LaunchIniService.ValidateStagedEntryPoint(staged, Config.LaunchHomebrew);
+                string xboxPath = XboxPath.Combine("Usb", [.. relativeLaunchPath.Split('/')]);
                 string bootstrapId = ArtifactCatalog.Bootstraps[Config.SelectedBootstrap].ID;
 
                 bool configured = await LaunchIniService.ConfigureStagedLaunchAsync(

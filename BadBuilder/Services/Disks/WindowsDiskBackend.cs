@@ -46,6 +46,9 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
                 if (string.IsNullOrWhiteSpace(stableId))
                     stableId = Convert.ToString(drive["PNPDeviceID"], CultureInfo.InvariantCulture)?.Trim();
                 long size = drive["Size"] is null ? 0 : Convert.ToInt64(drive["Size"], CultureInfo.InvariantCulture);
+                long bytesPerSector = drive["BytesPerSector"] is null
+                    ? 512
+                    : Convert.ToInt64(drive["BytesPerSector"], CultureInfo.InvariantCulture);
                 string transport = Convert.ToString(drive["InterfaceType"], CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
                 string mediaType = Convert.ToString(drive["MediaType"], CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
 
@@ -56,7 +59,9 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
                 // Fixed SATA/NVMe disks are intentionally never offered, even if manually selected elsewhere.
                 bool readOnly = flags?.IsReadOnly ?? false;
                 bool offline = flags?.IsOffline ?? false;
-                if (!removable || readOnly || offline || !DiskFormatter.IsSupportedDiskSize(size))
+                // The formatter emits a 512-byte-sector BPB; a 4Kn device would
+                // receive geometry it cannot use.
+                if (!removable || readOnly || offline || bytesPerSector != 512 || !DiskFormatter.IsSupportedDiskSize(size))
                     continue;
 
                 if (string.IsNullOrWhiteSpace(serial) &&
@@ -121,6 +126,14 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
 
             if (handle.IsInvalid)
                 throw Win32IOException($"Could not open {current.DevicePath} for writing");
+
+            // Trust the handle, not WMI: a counterfeit-capacity stick reports a
+            // larger size than it can actually address.
+            if (!GetFileSizeEx(handle, out long actualSize) || actualSize != current.Size)
+            {
+                throw new DiskSafetyException(
+                    $"The size of {current.DevicePath} changed after it was selected. Select the disk again.");
+            }
 
             await using FileStream stream = new(handle, FileAccess.ReadWrite);
             DiskFormatter.FormatFat32(stream, current.Size);
@@ -451,6 +464,10 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
     [LibraryImport("kernel32.dll", EntryPoint = "FlushFileBuffers", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool FlushFileBuffers(SafeFileHandle hFile);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFileSizeEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetFileSizeEx(SafeFileHandle hFile, out long lpFileSize);
 
     private sealed class VolumeLock : IDisposable
     {

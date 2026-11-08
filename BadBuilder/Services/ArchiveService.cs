@@ -104,8 +104,10 @@ internal static class ArchiveService
         if (layout.RequireSingleTopLevelDirectory)
         {
             string[] directories = Directory.GetDirectories(stagingPath);
-            if (directories.Length != 1)
-                throw new InvalidDataException($"{artifact.DisplayName} must contain exactly one top-level directory.");
+            string[] files = Directory.GetFiles(stagingPath);
+            if (directories.Length != 1 || files.Length != 0)
+                throw new InvalidDataException(
+                    $"{artifact.DisplayName} must contain exactly one top-level directory and no top-level files.");
         }
     }
 
@@ -113,7 +115,11 @@ internal static class ArchiveService
     {
         FileServices.EnsureFile(archivePath);
         using IArchive archive = ArchiveFactory.OpenArchive(archivePath);
-        ArchiveExtractionLimits scanLimits = new(100_000, long.MaxValue, long.MaxValue, long.MaxValue);
+        ArchiveExtractionLimits scanLimits = new(
+            MaxEntries: 100_000,
+            MaxExpandedBytes: 16L * 1024 * 1024 * 1024,
+            TargetCapacityBytes: long.MaxValue,
+            StagingAvailableBytes: long.MaxValue);
 
         return [..InspectEntries(archive, scanLimits)
             .Where(entry => !entry.IsDirectory)

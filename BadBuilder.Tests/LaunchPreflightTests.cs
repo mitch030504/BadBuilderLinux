@@ -80,11 +80,11 @@ public sealed class LaunchPreflightTests
         ];
 
         bool updated = await LaunchIniService.ConfigureStagedLaunchAsync(
-            staged, bootstrap.ID, launchHomebrew, DefaultPath, CancellationToken.None);
+            staged, bootstrap.ID, launchHomebrew, @"Usb:\Apps\Aurora\Default.xex", CancellationToken.None);
 
         Assert.True(updated);
         Assert.Contains(
-            $"Default = {DefaultPath}",
+            @"Default = Usb:\Apps\Aurora\Default.xex",
             await File.ReadAllTextAsync(Path.Combine(maxFolder, "launch.ini")),
             StringComparison.Ordinal);
     }
@@ -201,6 +201,62 @@ public sealed class LaunchPreflightTests
 
         Assert.Throws<InvalidDataException>(() =>
             LaunchIniService.FindStagedLaunchIni(staged, bootstrap.ID));
+    }
+
+    [Fact]
+    public async Task UpdateDefault_RejectsDuplicatePathsSections()
+    {
+        using TemporaryDirectory temporary = new();
+        string path = Path.Combine(temporary.Path, "launch.ini");
+        await File.WriteAllTextAsync(
+            path,
+            "[Paths]\r\nDefault = Usb:\\a.xex\r\n[Paths]\r\nDefault = Usb:\\b.xex\r\n");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            LaunchIniService.UpdateDefaultAsync(path, @"Usb:\Apps\A\a.xex", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UpdateDefault_RejectsDuplicateDefaultKeys()
+    {
+        using TemporaryDirectory temporary = new();
+        string path = Path.Combine(temporary.Path, "launch.ini");
+        await File.WriteAllTextAsync(
+            path,
+            "[Paths]\r\nDefault = Usb:\\a.xex\r\nDefault = Usb:\\b.xex\r\n");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            LaunchIniService.UpdateDefaultAsync(path, @"Usb:\Apps\A\a.xex", CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(@"Usb:\Apps\My;App\App.xex")]
+    [InlineData(@"Usb:\Apps\My#App\App.xex")]
+    [InlineData("Usb:\\Apps\\My\"App\\App.xex")]
+    public async Task UpdateDefault_RejectsCharactersThatBreakIniParsing(string launchPath)
+    {
+        using TemporaryDirectory temporary = new();
+        string path = Path.Combine(temporary.Path, "launch.ini");
+        await File.WriteAllTextAsync(path, "[Paths]\r\nDefault = Usb:\\old.xex\r\n");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            LaunchIniService.UpdateDefaultAsync(path, launchPath, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UpdateDefault_AppendsPathsSectionWhenMissing()
+    {
+        using TemporaryDirectory temporary = new();
+        string path = Path.Combine(temporary.Path, "launch.ini");
+        await File.WriteAllTextAsync(path, "; comment only\r\n");
+
+        bool updated = await LaunchIniService.UpdateDefaultAsync(
+            path, @"Usb:\Apps\A\a.xex", CancellationToken.None);
+
+        Assert.True(updated);
+        string contents = await File.ReadAllTextAsync(path);
+        Assert.Contains("[Paths]", contents, StringComparison.Ordinal);
+        Assert.Contains(@"Default = Usb:\Apps\A\a.xex", contents, StringComparison.Ordinal);
     }
 
     private static string CreateDirectory(string root, string relativePath)

@@ -68,6 +68,31 @@ public sealed class DiskFormatterTests
         Assert.Equal(1, Enumerable.Range(0, 4).Count(index => sector[446 + index * 16 + 4] != 0));
     }
 
+    [Theory]
+    [InlineData(1L, 64)]
+    [InlineData(2L, 128)]
+    [InlineData(3L, 128)]
+    [InlineData(4L, 255)]
+    [InlineData(33L, 255)]
+    public void Layout_SelectsExpectedHeads(long gibibytes, int expectedHeads)
+    {
+        long size = gibibytes * 1024L * 1024 * 1024;
+
+        Assert.True(DiskFormatter.TryGetFat32Layout(size, out DiskFormatter.Fat32Layout layout));
+        Assert.Equal(expectedHeads, layout.Heads);
+    }
+
+    [Theory]
+    [InlineData(32L, 32)]
+    [InlineData(33L, 64)]
+    public void Layout_SelectsExpectedClusterSizeAtTheBoundary(long gibibytes, int expectedSectorsPerCluster)
+    {
+        long size = gibibytes * 1024L * 1024 * 1024;
+
+        Assert.True(DiskFormatter.TryGetFat32Layout(size, out DiskFormatter.Fat32Layout layout));
+        Assert.Equal(expectedSectorsPerCluster, layout.SectorsPerCluster);
+    }
+
     [Fact]
     public void ExclusiveDeviceHandle_RejectsMissingDevice()
     {

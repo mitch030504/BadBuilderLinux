@@ -446,7 +446,9 @@ internal static class InstallService
         long usedClusters = 0;
         foreach (long entryCount in entries.Values)
         {
-            long directoryBytes = checked(entryCount * 32);
+            // Every directory needs one extra 32-byte slot for the 0x00
+            // end-of-directory marker, which can push it into another cluster.
+            long directoryBytes = checked((entryCount + 1) * 32);
             long directoryClusters = Math.Max(1, (directoryBytes + clusterSize - 1) / clusterSize);
             usedClusters = checked(usedClusters + directoryClusters);
         }
