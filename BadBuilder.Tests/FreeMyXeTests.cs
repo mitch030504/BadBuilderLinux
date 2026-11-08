@@ -43,7 +43,7 @@ public sealed class FreeMyXeTests
         InstallPlan plan = InstallService.BuildPlan(
             [(exploit, exploitRoot), (ArtifactCatalog.Bootstraps[BootstrapOption.FreeMyXe], freeMyXeRoot)],
             [], 128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal(
             freeMyXeBytes,
@@ -72,7 +72,7 @@ public sealed class FreeMyXeTests
         InstallPlan plan = InstallService.BuildPlan(
             [(exploit, exploitRoot), (ArtifactCatalog.Bootstraps[BootstrapOption.FreeMyXe], freeMyXeRoot)],
             [], 128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal(
             freeMyXeBytes,

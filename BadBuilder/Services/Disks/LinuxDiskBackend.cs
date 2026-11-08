@@ -93,6 +93,69 @@ internal static partial class LinuxNative
 
     internal static int RereadPartitions(int fd) => IoctlNoArgument(fd, BlockRereadPartitions);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct StatVfsBuffer
+    {
+        public ulong BlockSize;
+        public ulong FragmentSize;
+        public ulong Blocks;
+        public ulong BlocksFree;
+        public ulong BlocksAvailable;
+        public ulong Files;
+        public ulong FilesFree;
+        public ulong FilesAvailable;
+        public ulong FileSystemId;
+        public ulong Flags;
+        public ulong NameMax;
+        public ulong Type;
+        public ulong Spare0;
+        public ulong Spare1;
+        public ulong Spare2;
+        public ulong Spare3;
+        public ulong Spare4;
+    }
+
+    [LibraryImport("libc", EntryPoint = "statvfs", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int StatVfs(string path, out StatVfsBuffer buffer);
+
+    internal static long GetAvailableBytes(string path)
+    {
+        if (StatVfs(path, out StatVfsBuffer stats) != 0)
+            throw new IOException($"Could not read free space for {path}. OS error {Marshal.GetLastPInvokeError()}.");
+
+        ulong available = stats.BlocksAvailable * stats.FragmentSize;
+        return available > long.MaxValue ? long.MaxValue : (long)available;
+    }
+
+    internal static bool IsMountPoint(string fullPath)
+    {
+        try
+        {
+            foreach (string line in File.ReadLines("/proc/self/mountinfo"))
+            {
+                string[] fields = line.Split(' ');
+                if (fields.Length < 5)
+                    continue;
+
+                string mountPoint = UnescapeMountInfo(fields[4]).TrimEnd('/');
+                if (string.Equals(mountPoint, fullPath, StringComparison.Ordinal))
+                    return true;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static string UnescapeMountInfo(string value) =>
+        value.Replace("\\040", " ", StringComparison.Ordinal)
+            .Replace("\\011", "\t", StringComparison.Ordinal)
+            .Replace("\\012", "\n", StringComparison.Ordinal)
+            .Replace("\\134", "\\", StringComparison.Ordinal);
+
     internal static void ChangeOwner(string path, uint owner, uint group)
     {
         if (ChangeOwnerNative(path, owner, group) != 0)

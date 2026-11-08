@@ -84,7 +84,7 @@ public sealed class PeerPressureTests
         InstallPlan plan = InstallService.BuildPlan(staged, [], 128L * 1024 * 1024);
         string target = Path.Combine(temporary.Path, "target");
         Directory.CreateDirectory(target);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal("BadUpdatePayload/default.xex",
             await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
@@ -144,7 +144,7 @@ public sealed class PeerPressureTests
         InstallPlan plan = InstallService.BuildPlan(prepared, [], 1024L * 1024 * 1024);
         string target = Path.Combine(temporary.Path, "target");
         Directory.CreateDirectory(target);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         foreach (PlannedInstallAction action in plan.Actions.Where(action => action.Kind == PlannedActionKind.CopyFile &&
             action.DestinationRelativePath != "BadUpdatePayload/SoftmodExtras/SoftmodExtras.ini"))

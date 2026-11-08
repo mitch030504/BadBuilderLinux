@@ -383,7 +383,7 @@ internal static class LinuxDiskHelper
     {
         ProcessResult find = await ProcessRunner.RunAsync(
             ProcessRunner.RequireExecutable("findmnt"),
-            ["--json", "--mountpoint", mountRoot, "--output", "SOURCE,TARGET,OPTIONS"],
+            ["--json", "--mountpoint", mountRoot, "--output", "SOURCE,TARGET,OPTIONS,FSTYPE,LABEL"],
             cancellationToken);
         find.EnsureSuccess($"Verifying the mount at {mountRoot}");
 
@@ -392,6 +392,12 @@ internal static class LinuxDiskHelper
         string source = mount.GetProperty("source").GetString() ?? string.Empty;
         string target = mount.GetProperty("target").GetString() ?? string.Empty;
         string options = mount.GetProperty("options").GetString() ?? string.Empty;
+        string fileSystem = mount.TryGetProperty("fstype", out JsonElement fileSystemElement)
+            ? fileSystemElement.GetString() ?? string.Empty
+            : string.Empty;
+        string label = mount.TryGetProperty("label", out JsonElement labelElement)
+            ? labelElement.GetString() ?? string.Empty
+            : string.Empty;
 
         HashSet<string> mountOptions = [..options.Split(',', StringSplitOptions.RemoveEmptyEntries)];
         string expectedUid = $"uid={uid.ToString(CultureInfo.InvariantCulture)}";
@@ -400,6 +406,8 @@ internal static class LinuxDiskHelper
             mountOptions.Contains("fmask=0077") && mountOptions.Contains("dmask=0077");
         if (!string.Equals(source, partition, StringComparison.Ordinal) ||
             !string.Equals(Path.GetFullPath(target), mountRoot, StringComparison.Ordinal) ||
+            !string.Equals(fileSystem, "vfat", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(label.Trim(), "BADUPDATE", StringComparison.OrdinalIgnoreCase) ||
             !mountOptions.Contains("nodev") ||
             !mountOptions.Contains("nosuid") ||
             !mountOptions.Contains("noexec") ||
@@ -407,7 +415,8 @@ internal static class LinuxDiskHelper
             !mountOptions.Contains(expectedGid) ||
             !privateMask)
         {
-            throw new DiskSafetyException("The prepared USB mount did not have the expected source, ownership, and safety options.");
+            throw new DiskSafetyException(
+                "The prepared USB mount did not have the expected source, filesystem, label, ownership, and safety options.");
         }
     }
 
@@ -415,7 +424,16 @@ internal static class LinuxDiskHelper
     {
         ProcessResult find = await ProcessRunner.RunAsync(
             ProcessRunner.RequireExecutable("findmnt"), ["--mountpoint", mountRoot], cancellationToken);
-        return find.ExitCode == 0;
+
+        if (find.ExitCode == 0)
+            return true;
+        // findmnt exits 1 when the path is not a mount point. Any other failure
+        // means the check itself failed and must not be read as "unmounted".
+        if (find.ExitCode == 1)
+            return false;
+
+        throw new IOException(
+            $"Could not determine whether {mountRoot} is mounted. findmnt exited {find.ExitCode}: {find.StandardError.Trim()}");
     }
 
     private static async Task CreateLeaseAsync(string path, LeaseRecord lease)

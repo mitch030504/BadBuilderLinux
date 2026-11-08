@@ -45,7 +45,7 @@ public sealed class InstallCoordinatorTests
             CancellationToken.None);
 
         Assert.Equal(
-            ["revalidate", "prepare", "copy:/run/badbuilder/1000/token", "finalize"],
+            ["revalidate", "prepare", "revalidate", "copy:/run/badbuilder/1000/token", "finalize"],
             calls);
         Assert.True(result.CopiedSuccessfully);
         Assert.True(result.FormatCompleted);
@@ -327,5 +327,13 @@ public sealed class InstallCoordinatorTests
             IsRemovable: true,
             IsHotPlug: false,
             IsReadOnly: false,
-            Volumes: []);
+            Volumes:
+            [
+                new VolumeInfo(
+                    "/dev/sdb1",
+                    "part",
+                    "vfat",
+                    "BADUPDATE",
+                    ["/run/badbuilder/1000/token"]),
+            ]);
 }

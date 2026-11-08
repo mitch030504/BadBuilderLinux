@@ -70,7 +70,7 @@ public sealed class InstallAndFormattingTests
             [(artifact, staging)],
             [new InstallOperation(InstallOperationKind.WriteFile, "name.txt", Contents: "USB")],
             128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal("xex", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
         Assert.Equal("USB", await File.ReadAllTextAsync(Path.Combine(target, "name.txt")));
@@ -114,7 +114,7 @@ public sealed class InstallAndFormattingTests
 
         InstallPlan plan = InstallService.BuildPlan(
             [(exploit, first), (bootstrap, second)], [], 128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal("bootstrap", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
     }
@@ -180,7 +180,7 @@ public sealed class InstallAndFormattingTests
         ArtifactDefinition max = ArtifactCatalog.Bootstraps[BootstrapOption.XeUnshackleMax];
         InstallPlan plan = InstallService.BuildPlan(
             [(exploit, exploitRoot), (max, maxRoot)], [], 128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Equal("max", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
         Assert.Equal("storage", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "BadStorage.xex.dll")));
@@ -240,7 +240,7 @@ public sealed class InstallAndFormattingTests
         InstallPlan plan = InstallService.BuildPlan(
             [(exploit, first), (ArtifactCatalog.Bootstraps[BootstrapOption.XeUnshackle], second)],
             [], 128L * 1024 * 1024);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
         Assert.Equal("bootstrap", await File.ReadAllTextAsync(Path.Combine(target, "BadUpdatePayload", "default.xex")));
     }
 

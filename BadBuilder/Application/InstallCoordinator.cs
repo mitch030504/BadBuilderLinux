@@ -105,6 +105,16 @@ internal sealed class InstallCoordinator
             _ui.WriteInfo("Copying the fully validated installation plan.");
             try
             {
+                // The device can be swapped or the volume unmounted while the plan
+                // is copied. Revalidate immediately before writing and confirm the
+                // prepared mount still belongs to this disk.
+                selected = await _backend.RevalidateAsync(selected.Identity, CancellationToken.None);
+                if (!IsExpectedMount(selected, prepared.MountRoot))
+                {
+                    throw new DiskSafetyException(
+                        $"The prepared volume {prepared.MountRoot} is no longer associated with {selected.DevicePath}.");
+                }
+
                 await _copy(plan, prepared.MountRoot, CancellationToken.None);
                 copied = true;
             }
@@ -128,6 +138,19 @@ internal sealed class InstallCoordinator
             prepared,
             false,
             copyError);
+    }
+
+    private static bool IsExpectedMount(DiskInfo disk, string mountRoot)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        string expected = mountRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        return disk.Volumes
+            .SelectMany(volume => volume.MountPoints)
+            .Select(path => path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            .Any(path => string.Equals(path, expected, comparison));
     }
 
     private async Task<bool> FinalizeAsync(PreparedTarget prepared)

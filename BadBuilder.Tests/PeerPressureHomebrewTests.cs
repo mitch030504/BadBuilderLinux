@@ -17,7 +17,7 @@ public sealed class PeerPressureHomebrewTests
         InstallPlan plan = InstallService.BuildPlan(prepared, [], 128L * 1024 * 1024);
         string target = Path.Combine(temporary.Path, "target");
         Directory.CreateDirectory(target);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         string extras = Path.Combine(target, "BadUpdatePayload", "SoftmodExtras");
         Assert.Equal("aurora", await File.ReadAllTextAsync(Path.Combine(extras, "homebrew-aurora", "Aurora.xex")));
@@ -93,7 +93,7 @@ public sealed class PeerPressureHomebrewTests
         InstallPlan plan = InstallService.BuildPlan(prepared, [], 128L * 1024 * 1024);
         string target = Path.Combine(temporary.Path, "target");
         Directory.CreateDirectory(target);
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         string extras = Path.Combine(target, "BadUpdatePayload", "SoftmodExtras");
         Assert.Equal("custom", await File.ReadAllTextAsync(Path.Combine(extras, app.Artifact.ID, "bin", "start.xex")));

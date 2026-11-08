@@ -85,13 +85,22 @@ internal static class InstallService
         return new InstallPlan(actions, required);
     }
 
+    internal static Task ExecuteAsync(
+        InstallPlan plan,
+        string targetRoot,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(plan, targetRoot, FileSystemSpace.IsMountPoint, cancellationToken);
+
     internal static async Task ExecuteAsync(
         InstallPlan plan,
         string targetRoot,
+        Func<string, bool> isMountPoint,
         CancellationToken cancellationToken)
     {
         if (!Directory.Exists(targetRoot))
             throw new DirectoryNotFoundException($"The prepared target mount does not exist: {targetRoot}");
+
+        EnsureTargetIsMounted(targetRoot, isMountPoint);
 
         long available = FileSystemSpace.GetAvailableBytes(targetRoot);
         if (available < plan.RequiredBytes)
@@ -113,19 +122,60 @@ internal static class InstallService
                         string source = action.SourcePath
                             ?? throw new InvalidOperationException("A planned file copy has no source.");
                         FileServices.EnsureFile(source);
-                        if (new FileInfo(source).Length != action.Size)
-                            throw new IOException($"A staged source changed after preflight: {source}");
                         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                        await using FileStream input = new(source, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                        await using FileStream output = new(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous);
-                        await input.CopyToAsync(output, cancellationToken);
+                        await using FileStream input = new(
+                            source,
+                            FileMode.Open,
+                            FileAccess.Read,
+                            FileShare.Read,
+                            81920,
+                            FileOptions.Asynchronous | FileOptions.SequentialScan);
+                        if (input.Length != action.Size)
+                            throw new IOException($"A staged source changed after preflight: {source}");
+
+                        await using FileStream output = new(
+                            destination,
+                            FileMode.Create,
+                            FileAccess.Write,
+                            FileShare.None,
+                            81920,
+                            FileOptions.Asynchronous | FileOptions.WriteThrough);
+
+                        long copied = 0;
+                        byte[] buffer = new byte[81920];
+                        int read;
+                        while ((read = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                        {
+                            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                            copied += read;
+                        }
+
+                        await output.FlushAsync(cancellationToken);
+                        output.Flush(flushToDisk: true);
+
+                        if (copied != action.Size || output.Length != action.Size)
+                            throw new IOException($"The staged source changed during the copy: {source}");
                         break;
                     }
 
                 case PlannedActionKind.WriteFile:
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                    await File.WriteAllBytesAsync(destination, action.Contents ?? [], cancellationToken);
-                    break;
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                        byte[] contents = action.Contents ?? [];
+                        await using FileStream output = new(
+                            destination,
+                            FileMode.Create,
+                            FileAccess.Write,
+                            FileShare.None,
+                            81920,
+                            FileOptions.Asynchronous | FileOptions.WriteThrough);
+                        await output.WriteAsync(contents, cancellationToken);
+                        await output.FlushAsync(cancellationToken);
+                        output.Flush(flushToDisk: true);
+                        if (output.Length != contents.Length)
+                            throw new IOException($"A planned file was not written completely: {destination}");
+                        break;
+                    }
 
                 case PlannedActionKind.MoveFile:
                     {
@@ -141,6 +191,19 @@ internal static class InstallService
                 default:
                     throw new InvalidOperationException($"Unsupported planned action: {action.Kind}.");
             }
+        }
+
+        // The automounter can unmount the volume mid-copy, in which case the writes
+        // land on the underlying directory. Never report success for that.
+        EnsureTargetIsMounted(targetRoot, isMountPoint);
+    }
+
+    private static void EnsureTargetIsMounted(string targetRoot, Func<string, bool> isMountPoint)
+    {
+        if (!isMountPoint(targetRoot))
+        {
+            throw new IOException(
+                $"The target {targetRoot} is no longer a mounted filesystem. The USB drive was removed or unmounted; reconnect it and retry.");
         }
     }
 

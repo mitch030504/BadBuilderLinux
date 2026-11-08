@@ -44,7 +44,7 @@ public sealed class LaunchPreflightTests
 
         InstallPlan plan = InstallService.BuildPlan(staged, [], 128L * 1024 * 1024);
         string target = CreateDirectory(temporary.Path, "target");
-        await InstallService.ExecuteAsync(plan, target, CancellationToken.None);
+        await InstallService.ExecuteAsync(plan, target, _ => true, CancellationToken.None);
 
         Assert.Contains(
             $"Default = {DefaultPath}",

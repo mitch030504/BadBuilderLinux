@@ -5,16 +5,32 @@ internal static class FileSystemSpace
     internal static long GetAvailableBytes(string path)
     {
         string fullPath = Path.GetFullPath(path);
-        DriveInfo? drive = DriveInfo.GetDrives()
+
+        if (OperatingSystem.IsLinux())
+            return Disks.LinuxNative.GetAvailableBytes(fullPath);
+
+        DriveInfo drive = DriveInfo.GetDrives()
             .Where(candidate => candidate.IsReady && PathSafety.IsWithinRoot(candidate.Name, fullPath))
             .OrderByDescending(candidate => candidate.Name.Length)
-            .FirstOrDefault();
+            .FirstOrDefault()
+            ?? throw new IOException(
+                $"Could not determine the filesystem containing {fullPath}. Refusing to continue without a verified free-space measurement.");
 
-        if (drive is not null)
-            return drive.AvailableFreeSpace;
+        return drive.AvailableFreeSpace;
+    }
 
-        string root = Path.GetPathRoot(fullPath)
-            ?? throw new IOException($"Could not determine the filesystem containing {fullPath}.");
-        return new DriveInfo(root).AvailableFreeSpace;
+    internal static bool IsMountPoint(string path)
+    {
+        string fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar);
+
+        if (OperatingSystem.IsLinux())
+            return Disks.LinuxNative.IsMountPoint(fullPath);
+
+        return DriveInfo.GetDrives().Any(drive =>
+            drive.IsReady &&
+            string.Equals(
+                Path.GetFullPath(drive.Name).TrimEnd(Path.DirectorySeparatorChar),
+                fullPath,
+                StringComparison.OrdinalIgnoreCase));
     }
 }
