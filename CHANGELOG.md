@@ -1,5 +1,46 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Every built-in artifact is pinned to an exact release tag, a compile-time SHA-256, and an expected size. GitHub's asset digest is recorded as transport integrity only; it no longer substitutes for a catalog pin, so the unverified-artifact approval prompt actually runs for unpinned sources.
+- The download manifest is no longer a trust anchor. Trust comes only from the compiled catalog, its archive path must resolve inside the artifact directory, and a manifest whose trusted hash disagrees with its approved hash is discarded.
+- A user-supplied local archive is imported into the cache before approval, so the approved bytes cannot be swapped before extraction.
+- The cache directory must not be writable by other users.
+
+### Fixed — disk selection
+
+- `HOTPLUG` is no longer treated as evidence of a removable disk; only a USB transport or the removable flag qualifies. Many internal SATA ports report `HOTPLUG`.
+- Every passwd home and the system mount roots (`/srv`, `/var`, `/usr`, `/opt`, `/etc`, `/efi`, `/root`, `/tmp`, `/run`, …) are protected, and every member of a multi-device filesystem is protected by UUID/MD_UUID.
+- A disk must expose a serial, a WWN, or a `/dev/disk/by-id` name, so two identical sticks cannot be swapped between confirmation and formatting.
+- Linux opens the target with `O_EXCL`, verifies the size on the handle, revalidates while holding it, and formats through it. The first and last MiB are erased so old GPT headers and MBR boot code do not survive.
+- Windows no longer maps a null WMI index onto disk 0, fails closed when `MSFT_Disk` is unavailable, locks unlettered and folder-mounted volumes by access path, rejects non-512-byte-sector disks, and verifies the on-device size through the opened handle.
+
+### Fixed — install
+
+- Free-space measurement fails closed instead of falling back to the root filesystem.
+- The copy refuses to run unless the target is a mount point, checked before and after, and the disk identity and mount association are revalidated immediately before writing.
+- Every file is flushed to disk and verified against the plan; a source that changes size during the copy is detected.
+- The mounted volume must report `vfat` and the `BADUPDATE` label.
+- `findmnt` errors are no longer read as "unmounted".
+- The privileged helper resolves commands from a fixed system path, refuses to execute group/other-writable binaries, clears `LD_*`, passes the cleanup token on stdin, and refuses to run from a location the caller can modify. A lease left by a killed helper is released automatically once its process is gone.
+
+### Fixed — correctness
+
+- FAT32 directory sizing counts the end-of-directory marker.
+- Reserved device names are matched before the first dot (`CON.tar.gz`), `CLOCK$` is covered, and the check is repeated after truncation.
+- The entry-point scan is bounded to the same expansion cap as extraction.
+- A single-top-level-directory layout rejects top-level files.
+- Total FAT32 relative paths are bounded to 255 characters.
+- `launch.ini` uses the validated install destination instead of the display name, rejects comment characters, and refuses duplicate `[Paths]` sections or `Default` keys.
+
+### Changed
+
+- `wipefs` and `blockdev` are no longer required; signature erasure and the partition-table refresh happen in-process against the held handle.
+- CI pins every action to a commit SHA, restores with `--locked-mode`, fails on any reported vulnerability, refuses a release dispatch from a non-main branch, rejects a tag that points at another commit, creates releases as drafts, and attests build provenance.
+- The test suite grows from 135 to 202 tests.
+
 ## [2.4.1](https://github.com/mitch030504/BadBuilderLinux/releases/tag/v2.4.1) — 2026-11-07
 
 ### Fixed

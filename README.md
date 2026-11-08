@@ -18,17 +18,29 @@ Get the binaries and `SHA256SUMS` from the [latest release](https://github.com/m
 | Linux x64 | `BadBuilder-linux-x64` | Make executable and run as your desktop user |
 | Windows x64 | `BadBuilder-win-x64.exe` | Launch and accept the administrator prompt |
 
-On Linux, download the Linux binary and `SHA256SUMS` into the same directory, then run:
+On Linux, download the Linux binary and `SHA256SUMS` into the same directory, verify it, then install it to a root-owned location. The privileged helper refuses to run from a directory the calling user can modify, because sudo would otherwise execute a replaceable binary as root.
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
 chmod +x BadBuilder-linux-x64
-./BadBuilder-linux-x64
+sudo install -o root -g root -m 0755 BadBuilder-linux-x64 /usr/local/bin/badbuilder
+badbuilder
 ```
 
-Linux requires `sudo` and the standard util-linux/coreutils commands: `lsblk`, `findmnt`, `wipefs`, `blockdev`, `mount`, `umount`, and `sync`. `udevadm` is optional; DiscUtils creates FAT32, so `dosfstools` is unnecessary. On CachyOS/Arch these commands normally come from `sudo`, `util-linux`, `util-linux-libs`, `coreutils`, and `systemd`.
+Linux requires `sudo` and the standard util-linux/coreutils commands: `lsblk`, `findmnt`, `mount`, `umount`, and `sync`. `udevadm` is optional; DiscUtils creates FAT32, so `dosfstools` is unnecessary. On CachyOS/Arch these commands normally come from `sudo`, `util-linux`, `util-linux-libs`, `coreutils`, and `systemd`.
 
 Run without sudo. BadBuilder requests sudo only for USB preparation and cleanup. On Windows, an Administrator terminal also works.
+
+### Sudo rule
+
+Grant sudo only to the installed helper, and only if you accept that the helper is the security boundary:
+
+```
+# /etc/sudoers.d/badbuilder
+youruser ALL=(root) NOPASSWD: /usr/local/bin/badbuilder --disk-helper *
+```
+
+The helper independently validates the caller UID and GID, the device, its fingerprint, the per-device lease, and the mount path. It also refuses to run when its own executable or directory is writable by the calling user. Never point a sudoers rule at a binary in your home directory or in `~/Downloads`.
 
 ## Choose a workflow
 
@@ -84,29 +96,29 @@ Both XeUnshackle variants can create or replace `BadUpdatePayload/default.xex` d
 
 ## Disk and download safeguards
 
-BadBuilder offers only eligible writable USB/removable/hot-plug whole disks. It validates the complete installation plan before destructive confirmation, rejects unsafe archive paths, FAT-incompatible names, and unintended file collisions, and rechecks the disk identity before formatting.
+BadBuilder offers only eligible writable USB or removable whole disks. `HOTPLUG` alone is not treated as removable, because many internal SATA ports report it. A disk must also expose a serial number, a WWN, or a stable `/dev/disk/by-id` name, so two identical sticks cannot be swapped between confirmation and formatting. It validates the complete installation plan before destructive confirmation, rejects unsafe archive paths, FAT-incompatible names, and unintended file collisions, and rechecks the disk identity before formatting.
 
-On Linux, disks backing the OS, boot, the caller's actual home, swap, workspace, or cache are excluded. Protected paths and mount targets are resolved through symlinks, and the scoped sudo helper independently resolves the caller's home from their UID rather than trusting root's environment. The helper also checks the disk fingerprint, takes a per-device lease, unmounts child volumes, creates an MBR with one `BADUPDATE` FAT32 partition, and mounts it below `/run/badbuilder/<uid>/<token>` with `nodev,nosuid,noexec` and caller ownership. Cleanup flushes and normally unmounts it; force and lazy unmounting are not used. A failed cleanup is persisted so **Retry USB cleanup** can reuse the authenticated lease after the app restarts; a missing `/run` lease is treated as complete only when the mount is gone.
+On Linux, disks backing the OS, boot, any user's home, swap, workspace, or cache are excluded, along with separately mounted system volumes such as `/srv`, `/var`, `/usr`, `/opt`, `/efi`, and `/run`. Multi-device filesystems are protected as a whole: every member of a btrfs filesystem or mdraid array sharing the protected UUID is excluded. Protected paths and mount targets are resolved through symlinks, and the scoped sudo helper independently resolves the caller's home from their UID rather than trusting root's environment. The helper opens the target with `O_EXCL`, revalidates the fingerprint while holding it, verifies the size on the handle, erases the first and last MiB so old GPT headers cannot survive, creates an MBR with one `BADUPDATE` FAT32 partition, and mounts it below `/run/badbuilder/<uid>/<token>` with `nodev,nosuid,noexec` and caller ownership. Cleanup flushes and normally unmounts it; force and lazy unmounting are not used. A failed cleanup is persisted so **Retry USB cleanup** can reuse the authenticated lease after the app restarts, and a lease left by a killed helper is released automatically once its process is gone.
 
-On Windows, system disks are excluded and USB/removable media is required. Every volume lock and dismount must succeed, and the selected disk identity is revalidated again after formatting before any drive letter is accepted. The destination must be exactly one FAT32 `BADUPDATE` volume, preventing a replacement device that reuses the same disk index from becoming the copy target. The published Windows executable requests administrator privileges; the Linux executable has no elevation manifest.
+On Windows, system disks are excluded and USB/removable media is required. Disks that report a non-512-byte sector size are rejected. Every partition's volume access path is locked and dismounted, including unlettered and folder-mounted volumes, and the operation aborts if partitions exist but none can be locked. The selected disk identity is revalidated again after formatting before any drive letter is accepted. The destination must be exactly one FAT32 `BADUPDATE` volume, preventing a replacement device that reuses the same disk index from becoming the copy target. The copy is revalidated against the disk and flushed before the app reports success. The published Windows executable requests administrator privileges; the Linux executable has no elevation manifest.
 
-GitHub sources require exactly one matching asset and an explicit release policy. Drafts are excluded. Peer Pressure, ABadAvatar 1.3 Beta, and XeUnshackle Max use pinned releases and SHA-256 values. Other sources follow their configured stable/prerelease policies. GitHub asset digests and catalog pins are enforced; when no trusted checksum exists, BadBuilder asks you to approve the displayed source and computed hash. Changed bytes require fresh approval, and failed downloads cannot replace valid cached archives.
+Every built-in artifact is pinned to an exact release tag, a compile-time SHA-256, and an expected size. GitHub's asset digest is treated as transfer integrity only: it never substitutes for a catalog pin, so the approval prompt still runs for anything unpinned. Drafts are excluded and exactly one asset must match. Changed bytes require fresh approval, and failed downloads cannot replace valid cached archives. The cache manifest records a previous decision but is never a source of authority; its archive path must resolve inside the artifact directory, and a manifest whose trusted hash disagrees with its approved hash is discarded.
 
-Downloads and manifests are cached at `$XDG_CACHE_HOME/badbuilder` (otherwise `~/.cache/badbuilder`) on Linux and `%LOCALAPPDATA%\BadBuilder\Cache` on Windows. Transient extraction directories are removed after each run; legacy `Work` directories are left alone. If online metadata is unavailable, a transfer fails, or a cached archive is invalid, BadBuilder offers a local archive through the same verification, approval, extraction, and planning checks. A single deadline covers response headers, streamed bodies, and GitHub metadata, so a stalled server cannot hold preflight indefinitely. Configured built-in apps are never silently skipped.
+Downloads and manifests are cached at `$XDG_CACHE_HOME/badbuilder` (otherwise `~/.cache/badbuilder`) on Linux and `%LOCALAPPDATA%\BadBuilder\Cache` on Windows. The cache directory must not be writable by other users. Transient extraction directories are removed after each run. If online metadata is unavailable, a transfer fails, or a cached archive is invalid, BadBuilder offers a local archive through the same verification, approval, extraction, and planning checks. Separate deadlines cover GitHub metadata and each download, so a stalled server cannot hold preflight indefinitely. Configured built-in apps are never silently skipped.
 
 ## Build and test
 
 The source requires the .NET 10 SDK.
 
 ```bash
-dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj
+dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj --locked-mode
 dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
 dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-build --no-restore
 dotnet publish BadBuilder/BadBuilder.csproj -c Release -r linux-x64 --self-contained true --no-restore
 dotnet publish BadBuilder/BadBuilder.csproj -c Release -r win-x64 --self-contained true --no-restore
 ```
 
-Nullable, platform, and analyzer warnings fail the build. The 135-test suite covers disk inventory and identity, symlinked protected paths, downloads and cache integrity, timeout and local-archive fallback, archive limits and paths, install planning, FAT32 allocation against disposable images from 1 to 16 GiB, launch.ini preflight, pending-cleanup recovery, and Peer Pressure extras, FATX limits, default-dashboard paths, and catalog injection checks.
+Nullable, platform, and analyzer warnings fail the build. The 202-test suite covers disk inventory, eligibility, and identity, symlinked and multi-device protected paths, exclusive-handle formatting, GPT erasure, downloads and cache integrity, timeout and local-archive fallback, archive limits and paths, install planning and execution, FAT32 allocation against disposable images from 1 to 16 GiB, launch.ini preflight, pending-cleanup recovery, the destructive install sequence, and Peer Pressure extras, FATX limits, default-dashboard paths, and catalog injection checks. Supported devices are 1 GiB to about 1 TiB; the 1–16 GiB images are test coverage, not a device limit.
 
 Optional checks:
 
@@ -117,7 +129,7 @@ Optional checks:
 
 ## Releases
 
-See [CHANGELOG.md](CHANGELOG.md) and the [release notes](.github/release-notes). To publish, increase `VersionPrefix` in `BadBuilder/BadBuilder.csproj`, add matching `.github/release-notes/vX.Y.Z.md`, update the changelog, and merge to `main`. GitHub Actions builds and tests Linux and Windows, validates versions and binary formats, generates checksums, and publishes the tag and release. An existing release is skipped; rerun the workflow to retry a failed publication.
+See [CHANGELOG.md](CHANGELOG.md) and the [release notes](.github/release-notes). To publish, increase `VersionPrefix` in `BadBuilder/BadBuilder.csproj`, add matching `.github/release-notes/vX.Y.Z.md`, update the changelog, and merge to `main`. GitHub Actions builds and tests Linux and Windows, validates versions and binary formats, generates checksums and build provenance, and publishes the tag and release. Releases are created as a draft, uploaded and verified, then published, so a failed upload can be repaired by rerunning the workflow. A manual dispatch from any branch other than `main` is refused, and a tag that points at a different commit is rejected.
 
 Previous binaries remain available on the releases page. Returning to an older builder affects future USB preparation; use Peer Pressure's official recovery/uninstall procedures for an already modified console.
 
