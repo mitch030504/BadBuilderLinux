@@ -188,7 +188,7 @@ internal static class LinuxUserHome
             string[] fields = entry.Split(':');
             if (fields.Length >= 7 &&
                 !string.IsNullOrWhiteSpace(fields[5]) &&
-                Path.IsPathFullyQualified(fields[5]))
+                fields[5].StartsWith('/'))
             {
                 homes.Add(fields[5]);
             }

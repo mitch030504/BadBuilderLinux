@@ -79,13 +79,35 @@ public sealed class InstallCoordinatorTests
     [Theory]
     [InlineData("")]
     [InlineData("/dev/sdb ")]
-    [InlineData("/DEV/SDB")]
     public async Task ConfirmationVariants_NeverPrepare(string confirmation)
     {
         FakeDiskBackend backend = new();
         InstallCoordinator coordinator = new(
             backend,
             new RecordingUserInterface(confirmation),
+            new FakeCleanupStore(),
+            (_, _, _) => Task.CompletedTask);
+
+        InstallExecutionResult result = await coordinator.ExecuteAsync(
+            backend.Disk,
+            EmptyPlan,
+            CancellationToken.None);
+
+        Assert.False(backend.PrepareCalled);
+        Assert.False(result.FormatCompleted);
+    }
+
+    [Fact]
+    public async Task ConfirmationCaseChange_IsRejectedOnCaseSensitivePlatforms()
+    {
+        // Windows device paths are compared case-insensitively by design.
+        if (OperatingSystem.IsWindows())
+            return;
+
+        FakeDiskBackend backend = new();
+        InstallCoordinator coordinator = new(
+            backend,
+            new RecordingUserInterface("/DEV/SDB"),
             new FakeCleanupStore(),
             (_, _, _) => Task.CompletedTask);
 

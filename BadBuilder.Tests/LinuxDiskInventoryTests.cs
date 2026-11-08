@@ -201,6 +201,9 @@ public sealed class LinuxDiskInventoryTests
     [Fact]
     public void HelperParser_RejectsUnknownOperationsAndArguments()
     {
+        if (!OperatingSystem.IsLinux())
+            return;
+
         string token = new('b', 32);
 
         Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest(["wipe"], token));
@@ -223,6 +226,9 @@ public sealed class LinuxDiskInventoryTests
     [Fact]
     public void HelperParser_AcceptsAWellFormedPrepareRequest()
     {
+        if (!OperatingSystem.IsLinux())
+            return;
+
         string token = new('b', 32);
 
         HelperRequest request = LinuxDiskHelper.ParseRequest([
