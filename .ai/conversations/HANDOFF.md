@@ -13,7 +13,7 @@ Last updated: 2026-11-08 11:04 CET by OpenCode (DeepSeek V4.1 Flash)
 
 ## Key Context
 - Current version: `2.4.1`; tag `v2.4.1`; release: https://github.com/mitch030504/BadBuilderLinux/releases/tag/v2.4.1
-- Current `main` HEAD: `260250e` (`test: keep FAT32 layout coverage within Windows runner capacity`).
+- Current release: `v2.4.1`; tag `v2.4.1` points at `260250e`. The agent-handoff bootstrap commit follows on `main`; the working tree is clean.
 - Test suite: **135 passed**; Linux and Windows self-contained single-file publishes and the release workflow are green.
 - Release assets and `SHA256SUMS` were verified against GitHub asset digests.
 - Automated tests do **not** cover physical USB drives, Windows runtime behavior, or privileged cleanup execution; treat those as manual checks.
