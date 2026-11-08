@@ -9,6 +9,7 @@
     <!-- The Windows publish requests elevation; Linux runs unprivileged and uses a scoped sudo helper. -->
     <ApplicationManifest Condition="'$(RuntimeIdentifier)' == 'win-x64'">app.manifest</ApplicationManifest>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <AnalysisLevel>latest-recommended</AnalysisLevel>

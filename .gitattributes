@@ -1,2 +1,18 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Scripts and workflow files must stay LF so they run on Linux runners.
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# Binary payloads must never be normalized.
+*.exe binary
+*.dll binary
+*.zip binary
+*.7z binary
+*.rar binary
+*.bin binary
+*.xex binary

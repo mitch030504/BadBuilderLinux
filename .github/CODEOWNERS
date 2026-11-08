@@ -1,0 +1,4 @@
+# Changes to workflows and release machinery need an owner review.
+/.github/ @mitch030504
+/BadBuilder/ @mitch030504
+/BadBuilder.Tests/ @mitch030504

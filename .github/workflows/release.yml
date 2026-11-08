@@ -17,13 +17,20 @@ concurrency:
 
 jobs:
   prepare:
+    # A dispatch from any other branch must never publish an official release.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       needed: ${{ steps.version.outputs.needed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Determine next release
         id: version
         env:
@@ -39,9 +46,26 @@ jobs:
           tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # A pre-existing tag must point at the commit being released, otherwise
+          # the assets would not match the source the tag names.
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            tag_commit="$(git rev-parse "$tag^{commit}")"
+            if [ "$tag_commit" != "$GITHUB_SHA" ]; then
+              echo "Tag $tag points at $tag_commit, not $GITHUB_SHA." >&2
+              exit 1
+            fi
+          fi
+
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $tag already exists; no publication needed."
-            echo "needed=false" >> "$GITHUB_OUTPUT"
+            is_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+            if [ "$is_draft" = "true" ]; then
+              echo "Release $tag exists as a draft; it will be repaired."
+              echo "needed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Release $tag already exists; no publication needed."
+              echo "needed=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             test -f ".github/release-notes/$tag.md" || { echo "Missing release notes for $tag" >&2; exit 1; }
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -61,69 +85,107 @@ jobs:
             rid: win-x64
             binary: BadBuilder.exe
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          dotnet-version: 10.0.x
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
           cache: true
-          cache-dependency-path: '**/*.csproj'
-      - name: Restore
-        run: dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore (locked)
+        run: dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj --locked-mode
+
       - name: Audit dependencies
-        run: dotnet list BadBuilder/BadBuilder.csproj package --vulnerable --include-transitive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet list BadBuilder/BadBuilder.csproj package --vulnerable --include-transitive --format json --framework net10.0 > audit.json
+          count="$(jq '[.. | objects | .vulnerabilities? // empty | .[]] | length' audit.json)"
+          if [ "$count" -gt 0 ]; then
+            cat audit.json
+            echo "Found $count vulnerable package reference(s)." >&2
+            exit 1
+          fi
+
       - name: Verify pinned XeUnshackle Max release ZIP
         if: runner.os == 'Linux'
         run: python3 scripts/verify_xeunshackle_max_release.py
+
       - name: Build with warnings as errors
         run: dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-restore
+
       - name: Run unit tests
         run: dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release --no-build --no-restore
+
       - name: Publish self-contained executable
         run: dotnet publish BadBuilder/BadBuilder.csproj -c Release -r ${{ matrix.rid }} --self-contained true --no-restore -o dist
+
       - name: Validate Linux executable version
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           actual="$(./dist/BadBuilder --version)"
-          [[ "$actual" == "${{ needs.prepare.outputs.version }}"* ]] || { echo "Unexpected version: $actual"; exit 1; }
+          expected="${{ needs.prepare.outputs.version }}"
+          if [ "$actual" != "$expected" ] && [ "$actual" != "$expected+$GITHUB_SHA" ]; then
+            echo "Unexpected version: $actual (expected $expected or $expected+$GITHUB_SHA)" >&2
+            exit 1
+          fi
           file dist/BadBuilder | grep -q ELF
+
       - name: Validate Windows executable version
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $actual = (./dist/BadBuilder.exe --version).Trim()
-          if (-not $actual.StartsWith('${{ needs.prepare.outputs.version }}')) {
-            throw "Unexpected version: $actual"
+          $expected = '${{ needs.prepare.outputs.version }}'
+          if ($actual -ne $expected -and $actual -ne "$expected+$env:GITHUB_SHA") {
+            throw "Unexpected version: $actual (expected $expected or $expected+$env:GITHUB_SHA)"
           }
           $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path ./dist/BadBuilder.exe))
           if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) {
             throw "Windows executable is missing the MZ header"
           }
-      - uses: actions/upload-artifact@v7
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-${{ matrix.rid }}
           path: dist/${{ matrix.binary }}
           if-no-files-found: error
           compression-level: 0
+          retention-days: 1
 
   publish:
     needs: [prepare, build]
     if: needs.prepare.outputs.needed == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-linux-x64
           path: release/linux
-      - uses: actions/download-artifact@v7
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: release-win-x64
           path: release/windows
+
       - name: Assemble verified release assets
         shell: bash
         run: |
@@ -136,18 +198,34 @@ jobs:
           cd release
           sha256sum BadBuilder-linux-x64 BadBuilder-win-x64.exe > SHA256SUMS
           sha256sum -c SHA256SUMS
-      - name: Create GitHub release
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            release/BadBuilder-linux-x64
+            release/BadBuilder-win-x64.exe
+
+      - name: Create or repair GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$TAG" \
-            release/BadBuilder-linux-x64 \
-            release/BadBuilder-win-x64.exe \
-            release/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "BadBuilderLinux $TAG" \
-            --notes-file ".github/release-notes/$TAG.md"
+          assets=(release/BadBuilder-linux-x64 release/BadBuilder-win-x64.exe release/SHA256SUMS)
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Only a draft can reach this branch; a published release skips the job.
+            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "BadBuilderLinux $TAG" \
+              --notes-file ".github/release-notes/$TAG.md" \
+              --draft
+            gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          fi
+
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
