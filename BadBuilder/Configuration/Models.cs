@@ -29,7 +29,7 @@ internal enum ReleaseSelectionPolicy
     ExactTag,
 }
 
-internal abstract record Source(string? TrustedSHA256 = null);
+internal abstract record Source(string? TrustedSHA256 = null, long? ExpectedSize = null);
 
 internal sealed record GitHubReleaseSource(
     string Owner,
@@ -37,9 +37,13 @@ internal sealed record GitHubReleaseSource(
     string AssetPattern,
     ReleaseSelectionPolicy ReleasePolicy = ReleaseSelectionPolicy.LatestStable,
     string? ReleaseTag = null,
-    string? PinnedSHA256 = null) : Source(PinnedSHA256);
+    string? TrustedSHA256 = null,
+    long? ExpectedSize = null) : Source(TrustedSHA256, ExpectedSize);
 
-internal sealed record DirectSource(string URL, string? PinnedSHA256 = null) : Source(PinnedSHA256);
+internal sealed record DirectSource(
+    string URL,
+    string? TrustedSHA256 = null,
+    long? ExpectedSize = null) : Source(TrustedSHA256, ExpectedSize);
 
 internal sealed record ArchiveLayout(
     IReadOnlyList<string>? RequiredPaths = null,

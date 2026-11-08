@@ -42,7 +42,7 @@ public sealed class GitHubAndDownloadTests
         Assert.Equal("avatar-v1.3-beta", source.ReleaseTag);
         Assert.Equal(
             "A94E0948A5F10AA288BA3A5909B55F90AE56C3CFA628B9D429E178737A0F1E35",
-            source.PinnedSHA256);
+            source.TrustedSHA256);
         Assert.Contains("BadUpdatePayload", artifact.Layout?.RequiredPaths ?? []);
         Assert.Contains("Content", artifact.Layout?.RequiredPaths ?? []);
     }
@@ -59,7 +59,7 @@ public sealed class GitHubAndDownloadTests
         Assert.Equal("XeUnshackle-Max-v1.0.0.zip", source.AssetPattern);
         Assert.Equal(ReleaseSelectionPolicy.ExactTag, source.ReleasePolicy);
         Assert.Equal("v1.0.0", source.ReleaseTag);
-        Assert.Equal("838CF16450790601158265C22C84D90C1F9FFFF7BA07854B9781722DBA2328E4", source.PinnedSHA256);
+        Assert.Equal("838CF16450790601158265C22C84D90C1F9FFFF7BA07854B9781722DBA2328E4", source.TrustedSHA256);
         Assert.True(artifact.Layout?.RequireSingleTopLevelDirectory);
         Assert.Equal(2, artifact.Operations?.Count);
         Assert.Equal("BadUpdatePayload", artifact.Operations![0].DestinationPath);
@@ -209,6 +209,152 @@ public sealed class GitHubAndDownloadTests
 
         Assert.Equal("known-good", await File.ReadAllTextAsync(target));
         Assert.False(File.Exists(target + ".partial"));
+    }
+
+    [Fact]
+    public async Task UnpinnedArtifact_DoesNotTreatTransportDigestAsTrust()
+    {
+        GitHubReleaseSource source = new("owner", "repo", "artifact.zip", ReleaseSelectionPolicy.ExactTag, "v1");
+        ArtifactDefinition artifact = new("artifact", "Artifact", "Test", string.Empty, source);
+        using HttpClient client = GitHubStub(ReleaseJson(TransportDigest));
+        GitHubReleaseClient github = new(client);
+
+        ArtifactReference reference = await github.ResolveAsync(artifact, source, CancellationToken.None);
+
+        // The API digest is transport integrity, never a trust anchor.
+        Assert.Null(reference.ExpectedSHA256);
+        Assert.Equal(TransportDigest, reference.TransportSHA256);
+    }
+
+    [Fact]
+    public async Task PinnedArtifact_KeepsCatalogPinAndRecordsTransportDigestSeparately()
+    {
+        string pin = new('A', 64);
+        GitHubReleaseSource source = new(
+            "owner", "repo", "artifact.zip", ReleaseSelectionPolicy.ExactTag, "v1", pin, 123);
+        ArtifactDefinition artifact = new("artifact", "Artifact", "Test", string.Empty, source);
+        using HttpClient client = GitHubStub(ReleaseJson(TransportDigest));
+        GitHubReleaseClient github = new(client);
+
+        ArtifactReference reference = await github.ResolveAsync(artifact, source, CancellationToken.None);
+
+        Assert.Equal(pin, reference.ExpectedSHA256);
+        Assert.Equal(TransportDigest, reference.TransportSHA256);
+        Assert.Equal(123, reference.ExpectedSize);
+    }
+
+    [Theory]
+    [InlineData("../../escape.zip")]
+    [InlineData("/etc/passwd")]
+    public async Task ManifestArchivePathOutsideArtifactRoot_IsRejected(string archivePath)
+    {
+        using TemporaryDirectory temporary = new();
+        ArtifactDefinition artifact = new("artifact", "Artifact", "Test", string.Empty, null);
+        string root = Path.Combine(temporary.Path, artifact.ID);
+        Directory.CreateDirectory(root);
+        await File.WriteAllTextAsync(
+            Path.Combine(root, "download-manifest.json"),
+            $$"""
+            {"versionTag":"v1","assetName":"a.zip","archivePath":"{{archivePath}}","approvedSHA256":"{{new string('A', 64)}}"}
+            """);
+
+        string? recovered = await DownloadService.GetCachedArchivePathAsync(artifact, temporary.Path, CancellationToken.None);
+
+        Assert.Null(recovered);
+    }
+
+    [Fact]
+    public async Task PinnedLocalArchiveWithWrongBytes_IsRejected()
+    {
+        using TemporaryDirectory temporary = new();
+        string source = Path.Combine(temporary.Path, "local.zip");
+        await File.WriteAllTextAsync(source, "wrong bytes");
+        ArtifactDefinition artifact = new(
+            "artifact",
+            "Artifact",
+            "Test",
+            string.Empty,
+            new DirectSource("https://example.test/a.zip", new string('A', 64)),
+            LocalArchivePath: source);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => DownloadService.DownloadAsync(
+            [artifact],
+            Path.Combine(temporary.Path, "cache"),
+            CancellationToken.None,
+            approveUntrusted: _ => true));
+    }
+
+    [Fact]
+    public async Task PinnedSizeMismatch_IsRejectedAndPartialIsDeleted()
+    {
+        byte[] payload = Encoding.UTF8.GetBytes("payload");
+        await using LocalHttpServer server = await LocalHttpServer.StartAsync(payload, payload.Length);
+        using TemporaryDirectory temporary = new();
+        using HttpClient client = new();
+        string target = Path.Combine(temporary.Path, "asset.zip");
+        ArtifactReference reference = new(
+            "v1", "asset.zip", server.Url, null, "local test", payload.Length, null, payload.Length + 1);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            DownloadService.DownloadToPartialAsync(client, reference, target, CancellationToken.None));
+
+        Assert.False(File.Exists(target));
+        Assert.False(File.Exists(target + ".partial"));
+    }
+
+    [Fact]
+    public void EveryBuiltInArtifactHasAnExactPinAndSize()
+    {
+        foreach (ArtifactDefinition artifact in ArtifactCatalog.GetAllBuiltInArtifacts())
+        {
+            Assert.NotNull(artifact.Source);
+            Assert.True(
+                artifact.Source!.TrustedSHA256 is { Length: 64 },
+                $"{artifact.DisplayName} has no pinned SHA-256.");
+            Assert.True(
+                artifact.Source.ExpectedSize is > 0,
+                $"{artifact.DisplayName} has no pinned size.");
+
+            if (artifact.Source is GitHubReleaseSource github)
+            {
+                Assert.Equal(ReleaseSelectionPolicy.ExactTag, github.ReleasePolicy);
+                Assert.False(string.IsNullOrWhiteSpace(github.ReleaseTag));
+            }
+        }
+    }
+
+    private const string TransportDigest =
+        "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF";
+
+    private static string ReleaseJson(string digest) => $$"""
+        {
+          "tag_name": "v1",
+          "draft": false,
+          "prerelease": false,
+          "created_at": "2026-01-01T00:00:00Z",
+          "published_at": "2026-01-01T00:00:00Z",
+          "assets": [
+            {
+              "name": "artifact.zip",
+              "browser_download_url": "https://example.test/artifact.zip",
+              "size": 123,
+              "digest": "sha256:{{digest.ToLowerInvariant()}}"
+            }
+          ]
+        }
+        """;
+
+    private static HttpClient GitHubStub(string json) =>
+        new(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        }));
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) => Task.FromResult(response(request));
     }
 
     private static GitHubReleaseInfo Release(string tag, DateTimeOffset date, bool prerelease = false, bool draft = false) =>

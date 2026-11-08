@@ -49,13 +49,16 @@ public sealed class DownloadHardeningTests
         Assert.Equal(0, result.DownloadedCount);
         (ArtifactDefinition returned, string archivePath) = Assert.Single(result.Artifacts);
         Assert.Same(artifact, returned);
-        Assert.Equal(Path.GetFullPath(localArchive), archivePath);
+        // The supplied archive is imported into the cache so the approved bytes
+        // cannot be swapped between approval and extraction.
+        Assert.True(PathSafety.IsWithinRoot(downloadRoot, archivePath));
+        Assert.NotEqual(Path.GetFullPath(localArchive), archivePath);
         Assert.Equal(localBytes, await File.ReadAllBytesAsync(archivePath));
         Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
-    public async Task InvalidCachedOfflineArchive_PromptsForLocalArchiveAndUsesSuppliedFile()
+    public async Task InconsistentManifest_IsIgnoredAndCachedArchiveRequiresApproval()
     {
         using TemporaryDirectory temporary = new();
         string downloadRoot = Path.Combine(temporary.Path, "downloads");
@@ -78,10 +81,6 @@ public sealed class DownloadHardeningTests
             """;
         await File.WriteAllTextAsync(Path.Combine(artifactRoot, "download-manifest.json"), manifest);
 
-        string suppliedArchive = Path.Combine(temporary.Path, "supplied.zip");
-        byte[] suppliedBytes = Encoding.UTF8.GetBytes("supplied archive");
-        await File.WriteAllBytesAsync(suppliedArchive, suppliedBytes);
-
         ArtifactDefinition artifact = new("offline", "Offline", "Test", string.Empty, null);
         List<ArchivePathEntry> prompts = [];
         List<UntrustedArtifact> approvals = [];
@@ -98,18 +97,15 @@ public sealed class DownloadHardeningTests
             promptLocalArchives: entries =>
             {
                 prompts.AddRange(entries);
-                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [artifact.ID] = suppliedArchive,
-                };
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             });
 
-        Assert.Single(prompts);
+        Assert.Empty(prompts);
         UntrustedArtifact approval = Assert.Single(approvals);
-        Assert.True(approval.BytesChanged);
+        Assert.False(approval.BytesChanged);
         (_, string archivePath) = Assert.Single(result.Artifacts);
-        Assert.Equal(Path.GetFullPath(suppliedArchive), archivePath);
-        Assert.Equal(suppliedBytes, await File.ReadAllBytesAsync(archivePath));
+        Assert.Equal(Path.GetFullPath(cachedArchive), archivePath);
+        Assert.Equal(cachedBytes, await File.ReadAllBytesAsync(archivePath));
     }
 
     [Fact]

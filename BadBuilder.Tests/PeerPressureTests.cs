@@ -17,7 +17,7 @@ public sealed class PeerPressureTests
         Assert.Equal("SoftmodInstaller.zip", source.AssetPattern);
         Assert.Equal(ReleaseSelectionPolicy.ExactTag, source.ReleasePolicy);
         Assert.Equal("v1.0.477", source.ReleaseTag);
-        Assert.Equal("7C7D42C301E72145B9D1F0A0E23FF164FDEFBBE780C2019A3CE7465E963B1827", source.PinnedSHA256);
+        Assert.Equal("7C7D42C301E72145B9D1F0A0E23FF164FDEFBBE780C2019A3CE7465E963B1827", source.TrustedSHA256);
     }
 
     [Theory]
@@ -133,7 +133,7 @@ public sealed class PeerPressureTests
             await using (FileStream stream = File.OpenRead(archive))
             {
                 string hash = Convert.ToHexString(await SHA256.HashDataAsync(stream));
-                DownloadService.EnsureHashMatches(artifact.DisplayName, hash, source.PinnedSHA256);
+                DownloadService.EnsureHashMatches(artifact.DisplayName, hash, source.TrustedSHA256);
             }
             string root = await ArchiveService.ExtractAsync(artifact.ID, archive, temporary.Path,
                 ArchiveExtractionLimits.CreateDefault(temporary.Path, 1024L * 1024 * 1024), CancellationToken.None);

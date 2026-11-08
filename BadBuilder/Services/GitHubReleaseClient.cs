@@ -53,7 +53,10 @@ internal sealed class GitHubReleaseClient
         if (!Uri.TryCreate(asset.BrowserDownloadUrl, UriKind.Absolute, out Uri? downloadUri) || downloadUri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidDataException($"GitHub returned an unsafe asset URL for {artifact.DisplayName}.");
         string? digest = ParseDigest(asset.Digest);
-        string? expectedHash = ValidatePinnedHash(source.TrustedSHA256, artifact.DisplayName) ?? digest;
+        // The API digest is transport integrity only. It must never stand in for a
+        // catalog pin: a compromised upstream release would supply a matching digest
+        // and the unverified-artifact approval prompt would never run.
+        string? expectedHash = ValidatePinnedHash(source.TrustedSHA256, artifact.DisplayName);
 
         return new ArtifactReference(
             release.TagName,
@@ -61,7 +64,9 @@ internal sealed class GitHubReleaseClient
             downloadUri.AbsoluteUri,
             expectedHash,
             $"GitHub {source.Owner}/{source.Repo}",
-            asset.Size);
+            asset.Size,
+            digest,
+            source.ExpectedSize);
     }
 
     internal static GitHubReleaseInfo SelectRelease(
@@ -163,7 +168,9 @@ internal sealed record ArtifactReference(
     string DownloadUrl,
     string? ExpectedSHA256,
     string SourceDescription,
-    long? ContentLength);
+    long? ContentLength,
+    string? TransportSHA256 = null,
+    long? ExpectedSize = null);
 
 internal sealed record GitHubReleaseInfo(
     [property: JsonPropertyName("tag_name")] string TagName,

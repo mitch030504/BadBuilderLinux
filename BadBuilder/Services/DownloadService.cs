@@ -17,6 +17,8 @@ internal sealed record UntrustedArtifact(
 internal static class DownloadService
 {
     private const long MaximumArchiveDownloadBytes = 16L * 1024 * 1024 * 1024;
+    private const long MaximumManifestBytes = 64 * 1024;
+    private const long DownloadSpaceMarginBytes = 64L * 1024 * 1024;
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromMinutes(10);
     private static readonly HttpClient HttpClient = CreateHttpClient();
     private static readonly GitHubReleaseClient GitHubClient = new(HttpClient);
@@ -39,6 +41,7 @@ internal static class DownloadService
         GitHubReleaseClient githubClient = ReferenceEquals(client, HttpClient) ? GitHubClient : new(client);
 
         Directory.CreateDirectory(downloadRoot);
+        EnsurePrivateCacheDirectory(downloadRoot);
         Controls.WriteInfo("Resolving artifact releases.");
 
         IReadOnlyList<ResolvedArtifact> resolved = await ResolveArtifactsAsync(artifacts, githubClient, cancellationToken);
@@ -103,6 +106,20 @@ internal static class DownloadService
             [..plans.Select(plan => (plan.Artifact, ArchivePath: plan.Target))]);
     }
 
+    private static void EnsurePrivateCacheDirectory(string downloadRoot)
+    {
+        // The manifest records a previous approval. That record is only meaningful
+        // when no other user can write the directory holding it.
+        if (OperatingSystem.IsWindows())
+            return;
+
+        UnixFileMode mode = File.GetUnixFileMode(downloadRoot);
+        const UnixFileMode writableByOthers = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+        if ((mode & writableByOthers) != 0)
+            throw new IOException(
+                $"The download cache {downloadRoot} is writable by other users. Choose a private cache directory before continuing.");
+    }
+
     private static async Task<IReadOnlyList<ResolvedArtifact>> ResolveArtifactsAsync(
         IReadOnlyList<ArtifactDefinition> artifacts,
         GitHubReleaseClient githubClient,
@@ -161,7 +178,9 @@ internal static class DownloadService
             uri.AbsoluteUri,
             GitHubReleaseClient.ValidatePinnedHash(source.TrustedSHA256, artifact.DisplayName),
             uri.GetLeftPart(UriPartial.Authority),
-            null);
+            null,
+            null,
+            source.ExpectedSize);
     }
 
     private static async Task<Dictionary<string, string>> CollectLocalOverridesAsync(
@@ -216,7 +235,7 @@ internal static class DownloadService
 
         string localPath = Path.GetFullPath(FileServices.NormalizeUserPath(path));
         ResolvedArtifact item = new(artifact, reference, null);
-        return await CreatePlanAsync(item, downloadRoot, localPath, cancellationToken, useManifestTrust: false);
+        return await CreatePlanAsync(item, downloadRoot, localPath, cancellationToken);
     }
 
     private static bool IsRecoverableFailure(Exception exception) =>
@@ -232,8 +251,7 @@ internal static class DownloadService
         ResolvedArtifact item,
         string downloadRoot,
         string? localOverride,
-        CancellationToken cancellationToken,
-        bool useManifestTrust = true)
+        CancellationToken cancellationToken)
     {
         string artifactRoot = Path.Combine(downloadRoot, FileServices.ValidateIdentifier(item.Artifact.ID));
         Directory.CreateDirectory(artifactRoot);
@@ -243,7 +261,8 @@ internal static class DownloadService
         if (!string.IsNullOrWhiteSpace(localOverride))
         {
             FileServices.EnsureFile(localOverride);
-            return CreateExistingPlan(item, Path.GetFullPath(localOverride), manifestPath, manifest, PlanAction.Use, useManifestTrust);
+            string imported = await ImportLocalArchiveAsync(item.Artifact, localOverride, artifactRoot, cancellationToken);
+            return CreateExistingPlan(item, imported, manifestPath, manifest, PlanAction.Use);
         }
 
         if (item.Reference is null)
@@ -251,7 +270,7 @@ internal static class DownloadService
             string? cached = await GetCachedArchivePathAsync(item.Artifact, downloadRoot, cancellationToken);
             if (cached is null)
                 throw new InvalidOperationException($"No archive is available for required artifact {item.Artifact.DisplayName}.");
-            return CreateExistingPlan(item, cached, manifestPath, manifest, PlanAction.VerifyExisting, useManifestTrust);
+            return CreateExistingPlan(item, cached, manifestPath, manifest, PlanAction.VerifyExisting);
         }
 
         string safeName = Path.GetFileName(item.Reference.Name);
@@ -287,36 +306,79 @@ internal static class DownloadService
         return new DownloadPlan(item.Artifact, PlanAction.Download, target, manifestPath, item.Reference, manifest, BytesChanged: false);
     }
 
+    private static async Task<string> ImportLocalArchiveAsync(
+        ArtifactDefinition artifact,
+        string localPath,
+        string artifactRoot,
+        CancellationToken cancellationToken)
+    {
+        // A user-supplied archive lives outside the cache root. Copy it in so the
+        // manifest can keep a confined relative path and later runs can reuse it.
+        string fileName = Path.GetFileName(localPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new InvalidDataException($"The local archive for {artifact.DisplayName} has no file name.");
+
+        string localHash = FileServices.ComputeSHA256(localPath);
+        EnsureHashMatches(artifact.DisplayName, localHash, artifact.Source?.TrustedSHA256);
+
+        string target = Path.Combine(artifactRoot, fileName);
+        if (File.Exists(target) &&
+            string.Equals(FileServices.ComputeSHA256(target), localHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return target;
+        }
+
+        string temporary = target + $".{Guid.NewGuid():N}.import";
+        try
+        {
+            await using (FileStream input = new(localPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            await using (FileStream output = new(
+                temporary,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                81920,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await input.CopyToAsync(output, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+            File.Move(temporary, target, overwrite: true);
+            return target;
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+    }
+
     private static DownloadPlan CreateExistingPlan(
         ResolvedArtifact item,
         string path,
         string manifestPath,
         DownloadManifest? manifest,
-        PlanAction defaultAction,
-        bool useManifestTrust = true)
+        PlanAction defaultAction)
     {
         ArtifactReference? reference = item.Reference;
         string actual = FileServices.ComputeSHA256(path);
+        // Trust comes only from the compiled catalog. A manifest is a record of a
+        // previous decision, never a source of authority.
         string? expected = reference?.ExpectedSHA256 ?? item.Artifact.Source?.TrustedSHA256;
-        if (useManifestTrust)
-            expected ??= manifest?.TrustedSHA256;
         EnsureHashMatches(item.Artifact.DisplayName, actual, expected);
 
-        bool manifestTrusted = !useManifestTrust &&
-            manifest?.TrustedSHA256 is string manifestHash &&
-            string.Equals(manifestHash, actual, StringComparison.OrdinalIgnoreCase);
-        bool trusted = expected is not null || manifestTrusted;
-        bool approved = !trusted && manifest is not null &&
+        bool approved = manifest is not null &&
+            (reference is null || ManifestMatches(manifest, reference)) &&
             string.Equals(Path.GetFullPath(manifest.ArchivePath), Path.GetFullPath(path), PathComparison) &&
             string.Equals(manifest.ApprovedSHA256, actual, StringComparison.OrdinalIgnoreCase);
         bool changed = manifest?.ApprovedSHA256 is not null &&
             !string.Equals(manifest.ApprovedSHA256, actual, StringComparison.OrdinalIgnoreCase);
 
-        PlanAction action = trusted || approved ? PlanAction.VerifyExisting : defaultAction;
+        PlanAction action = expected is not null || approved ? PlanAction.VerifyExisting : defaultAction;
         if (approved)
             action = PlanAction.Reuse;
 
-        return new DownloadPlan(item.Artifact, action, path, manifestPath, reference, manifest, changed, useManifestTrust);
+        return new DownloadPlan(item.Artifact, action, path, manifestPath, reference, manifest, changed);
     }
 
     private static async Task ExecutePlanAsync(
@@ -338,6 +400,7 @@ internal static class DownloadService
             {
                 actualHash = await DownloadToPartialAsync(httpClient, reference, plan.Target, cancellationToken);
                 EnsureHashMatches(plan.Artifact.DisplayName, actualHash, reference.ExpectedSHA256);
+                EnsureTransportIntegrity(plan, actualHash);
 
                 if (reference.ExpectedSHA256 is null)
                     RequireUntrustedApproval(plan, actualHash, approveUntrusted);
@@ -353,9 +416,7 @@ internal static class DownloadService
         else
         {
             actualHash = FileServices.ComputeSHA256(plan.Target);
-            string? expected = plan.Reference?.ExpectedSHA256
-                ?? plan.Artifact.Source?.TrustedSHA256
-                ?? GetManifestTrust(plan, actualHash);
+            string? expected = plan.Reference?.ExpectedSHA256 ?? plan.Artifact.Source?.TrustedSHA256;
             EnsureHashMatches(plan.Artifact.DisplayName, actualHash, expected);
             if (expected is null)
                 RequireUntrustedApproval(plan, actualHash, approveUntrusted);
@@ -388,9 +449,21 @@ internal static class DownloadService
                 requestToken);
             response.EnsureSuccessStatusCode();
 
-            long? expectedLength = response.Content.Headers.ContentLength ?? reference.ContentLength;
+            long? expectedLength = response.Content.Headers.ContentLength ?? reference.ContentLength ?? reference.ExpectedSize;
             if (expectedLength > MaximumArchiveDownloadBytes)
                 throw new InvalidDataException($"The archive exceeds the {MaximumArchiveDownloadBytes} byte download limit.");
+
+            long reservedBytes = reference.ExpectedSize ?? expectedLength ?? 0;
+            if (reservedBytes > 0)
+            {
+                string downloadDirectory = Path.GetDirectoryName(Path.GetFullPath(target))
+                    ?? throw new InvalidDataException("The download target has no parent directory.");
+                long available = FileSystemSpace.GetAvailableBytes(downloadDirectory);
+                if (available < reservedBytes + DownloadSpaceMarginBytes)
+                    throw new IOException(
+                        $"Not enough free space to download {reference.Name}: {reservedBytes} bytes are required and {available} are available.");
+            }
+
             long bytesWritten = 0;
             using IncrementalHash hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             await using Stream input = await response.Content.ReadAsStreamAsync(requestToken);
@@ -415,6 +488,10 @@ internal static class DownloadService
                     throw new InvalidDataException($"The archive exceeded the {MaximumArchiveDownloadBytes} byte download limit.");
             }
             await output.FlushAsync(requestToken);
+
+            if (reference.ExpectedSize is long pinnedSize && bytesWritten != pinnedSize)
+                throw new InvalidDataException(
+                    $"The download of {reference.Name} has the wrong size: expected {pinnedSize} bytes, received {bytesWritten}.");
 
             if (expectedLength is not null && bytesWritten != expectedLength.Value)
                 throw new InvalidDataException($"The download was truncated: expected {expectedLength.Value} bytes, received {bytesWritten}.");
@@ -482,14 +559,14 @@ internal static class DownloadService
         string.Equals(manifest.VersionTag, reference.VersionTag, StringComparison.Ordinal) &&
         string.Equals(manifest.AssetName, reference.Name, StringComparison.Ordinal);
 
-    private static string? GetManifestTrust(DownloadPlan plan, string actualHash)
+    private static void EnsureTransportIntegrity(DownloadPlan plan, string actualHash)
     {
-        string? previous = plan.PreviousManifest?.TrustedSHA256;
-        if (previous is null)
-            return null;
-        if (plan.UseManifestTrust || string.Equals(previous, actualHash, StringComparison.OrdinalIgnoreCase))
-            return previous;
-        return null;
+        string? transport = plan.Reference?.TransportSHA256;
+        if (transport is null)
+            return;
+        if (!string.Equals(transport, actualHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                $"The bytes received for {plan.Artifact.DisplayName} do not match the digest reported by the source. The transfer is corrupt.");
     }
 
     internal static async Task<string?> GetCachedArchivePathAsync(
@@ -502,14 +579,8 @@ internal static class DownloadService
             return null;
 
         DownloadManifest? manifest = await ReadManifestAsync(Path.Combine(root, "download-manifest.json"), cancellationToken);
-        if (manifest is not null && !string.IsNullOrWhiteSpace(manifest.ArchivePath))
-        {
-            string path = Path.IsPathFullyQualified(manifest.ArchivePath)
-                ? manifest.ArchivePath
-                : Path.Combine(root, manifest.ArchivePath);
-            if (File.Exists(path))
-                return Path.GetFullPath(path);
-        }
+        if (manifest is not null && !string.IsNullOrWhiteSpace(manifest.ArchivePath) && File.Exists(manifest.ArchivePath))
+            return manifest.ArchivePath;
 
         string[] candidates = [..Directory.EnumerateFiles(root)
             .Where(path => !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
@@ -519,7 +590,10 @@ internal static class DownloadService
 
     private static async Task<DownloadManifest?> ReadManifestAsync(string path, CancellationToken cancellationToken)
     {
-        if (!File.Exists(path))
+        // A manifest is attacker-writable if the cache directory is shared. Reject
+        // links, oversized files, and any archive path that escapes the artifact root.
+        FileInfo info = new(path);
+        if (!info.Exists || info.LinkTarget is not null || info.Length > MaximumManifestBytes)
             return null;
         try
         {
@@ -527,9 +601,38 @@ internal static class DownloadService
             DownloadManifest? manifest = await JsonSerializer.DeserializeAsync<DownloadManifest>(stream, cancellationToken: cancellationToken);
             if (!IsValidManifest(manifest))
                 return null;
+
+            string root = Path.GetDirectoryName(Path.GetFullPath(path))
+                ?? throw new InvalidDataException("The download manifest has no parent directory.");
+            string? resolved = ResolveManifestArchivePath(root, manifest!.ArchivePath);
+            if (resolved is null)
+                return null;
+
+            manifest.ArchivePath = resolved;
             return manifest;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ResolveManifestArchivePath(string artifactRoot, string archivePath)
+    {
+        try
+        {
+            string fullRoot = Path.GetFullPath(artifactRoot);
+            string candidate = Path.IsPathFullyQualified(archivePath)
+                ? Path.GetFullPath(archivePath)
+                : PathSafety.ResolveInside(fullRoot, archivePath);
+            if (!PathSafety.IsWithinRoot(fullRoot, candidate))
+                return null;
+
+            // A link inside the cache can still point anywhere.
+            FileInfo info = new(candidate);
+            return info.LinkTarget is null ? candidate : null;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or ArgumentException or NotSupportedException)
         {
             return null;
         }
@@ -547,7 +650,23 @@ internal static class DownloadService
             return false;
         }
 
-        _ = Path.GetFullPath(manifest.ArchivePath);
+        // A trusted hash is only ever written from a catalog pin, and a pin must
+        // match the bytes. Any divergence means the manifest was edited or corrupted.
+        if (manifest.TrustedSHA256 is not null &&
+            !string.Equals(manifest.TrustedSHA256, manifest.ApprovedSHA256, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = PathSafety.NormalizeRelativePath(manifest.ArchivePath);
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -563,10 +682,11 @@ internal static class DownloadService
         {
             VersionTag = plan.Reference?.VersionTag ?? "local",
             AssetName = plan.Reference?.Name ?? Path.GetFileName(plan.Target),
-            ArchivePath = plan.Target,
-            TrustedSHA256 = plan.Reference is null
-                ? plan.Artifact.Source?.TrustedSHA256 ?? GetManifestTrust(plan, actualHash)
-                : plan.Reference.ExpectedSHA256 ?? plan.Artifact.Source?.TrustedSHA256,
+            ArchivePath = Path.GetRelativePath(
+                Path.GetDirectoryName(plan.ManifestPath)
+                    ?? throw new InvalidOperationException("The download manifest has no parent directory."),
+                plan.Target),
+            TrustedSHA256 = plan.Artifact.Source?.TrustedSHA256,
             ApprovedSHA256 = actualHash,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
         };
@@ -609,8 +729,7 @@ internal static class DownloadService
         string ManifestPath,
         ArtifactReference? Reference,
         DownloadManifest? PreviousManifest,
-        bool BytesChanged,
-        bool UseManifestTrust = true);
+        bool BytesChanged);
 
     private sealed class DownloadManifest
     {
