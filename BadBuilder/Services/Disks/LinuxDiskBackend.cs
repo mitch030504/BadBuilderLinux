@@ -93,6 +93,44 @@ internal static partial class LinuxNative
 
     internal static int RereadPartitions(int fd) => IoctlNoArgument(fd, BlockRereadPartitions);
 
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct StatxBuffer
+    {
+        [FieldOffset(0)] public uint Mask;
+        [FieldOffset(4)] public uint BlockSize;
+        [FieldOffset(8)] public ulong Attributes;
+        [FieldOffset(16)] public uint LinkCount;
+        [FieldOffset(20)] public uint Uid;
+        [FieldOffset(24)] public uint Gid;
+        [FieldOffset(28)] public ushort Mode;
+    }
+
+    [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Statx(int dirfd, string path, int flags, uint mask, out StatxBuffer buffer);
+
+    /// <summary>
+    /// Reads owner, group, and mode through statx, whose layout is identical on
+    /// every 64-bit Linux architecture.
+    /// </summary>
+    internal static bool TryGetOwner(string path, out uint uid, out uint gid, out ushort mode)
+    {
+        const int AtFdCwd = -100;
+        const uint StatxBasicStats = 0x7ff;
+
+        if (Statx(AtFdCwd, path, 0, StatxBasicStats, out StatxBuffer buffer) != 0)
+        {
+            uid = 0;
+            gid = 0;
+            mode = 0;
+            return false;
+        }
+
+        uid = buffer.Uid;
+        gid = buffer.Gid;
+        mode = buffer.Mode;
+        return true;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct StatVfsBuffer
     {
@@ -239,12 +277,11 @@ internal sealed class LinuxDiskBackend : IDiskBackend
             "--fingerprint", selected.Fingerprint,
             "--uid", uid.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "--gid", gid.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            "--token", token,
             "--workspace", AppPaths.WorkspaceRoot,
             "--cache", AppPaths.CacheRoot,
         ];
 
-        LinuxHelperResponse response = await InvokeHelperAsync(helperArguments, cancellationToken);
+        LinuxHelperResponse response = await InvokeHelperAsync(helperArguments, token, cancellationToken);
         if (!response.Success || string.IsNullOrWhiteSpace(response.MountRoot))
             throw new DiskSafetyException(response.Error ?? "The privileged disk helper did not prepare the USB disk.");
 
@@ -260,7 +297,6 @@ internal sealed class LinuxDiskBackend : IDiskBackend
             "--fingerprint", target.Identity.Fingerprint,
             "--uid", LinuxNative.GetUserId().ToString(System.Globalization.CultureInfo.InvariantCulture),
             "--gid", LinuxNative.GetGroupId().ToString(System.Globalization.CultureInfo.InvariantCulture),
-            "--token", target.CleanupToken,
             "--mount", target.MountRoot,
             "--workspace", AppPaths.WorkspaceRoot,
             "--cache", AppPaths.CacheRoot,
@@ -268,7 +304,7 @@ internal sealed class LinuxDiskBackend : IDiskBackend
 
         try
         {
-            LinuxHelperResponse response = await InvokeHelperAsync(helperArguments, cancellationToken);
+            LinuxHelperResponse response = await InvokeHelperAsync(helperArguments, target.CleanupToken, cancellationToken);
             return new FinalizeResult(response.Success, response.StillMounted, response.Error);
         }
         catch (Exception ex) when (ex is IOException or JsonException)
@@ -312,11 +348,18 @@ internal sealed class LinuxDiskBackend : IDiskBackend
         return File.Exists(candidate) ? candidate : null;
     }
 
-    private static async Task<LinuxHelperResponse> InvokeHelperAsync(IReadOnlyList<string> helperArguments, CancellationToken cancellationToken)
+    private static async Task<LinuxHelperResponse> InvokeHelperAsync(
+        IReadOnlyList<string> helperArguments,
+        string cleanupToken,
+        CancellationToken cancellationToken)
     {
-        string sudo = ProcessRunner.RequireExecutable("sudo");
+        string sudo = ProcessRunner.RequireSystemExecutable("sudo");
         (string fileName, IReadOnlyList<string> arguments) = BuildSudoInvocation(sudo, helperArguments);
-        ProcessResult process = await ProcessRunner.RunAsync(fileName, arguments, cancellationToken);
+        ProcessResult process = await ProcessRunner.RunAsync(
+            fileName,
+            arguments,
+            cancellationToken,
+            standardInput: cleanupToken + "\n");
 
         LinuxHelperResponse? response;
         try

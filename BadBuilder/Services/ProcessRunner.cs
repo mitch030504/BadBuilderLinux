@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using BadBuilder.Services.Disks;
 
 namespace BadBuilder.Services;
 
@@ -17,6 +18,13 @@ internal sealed record ProcessResult(int ExitCode, string StandardOutput, string
 
 internal static class ProcessRunner
 {
+    private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromMinutes(5);
+
+    private static readonly string[] SystemSearchPath =
+    [
+        "/usr/sbin", "/usr/bin", "/sbin", "/bin", "/usr/local/sbin", "/usr/local/bin",
+    ];
+
     internal static ProcessStartInfo CreateStartInfo(
         string fileName,
         IEnumerable<string> arguments,
@@ -34,6 +42,14 @@ internal static class ProcessRunner
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
+        if (OperatingSystem.IsLinux() && LinuxNative.GetEffectiveUserId() == 0)
+        {
+            // Running as root: ignore anything the caller could have influenced.
+            startInfo.Environment["PATH"] = string.Join(':', SystemSearchPath);
+            foreach (string variable in new[] { "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "LD_DEBUG" })
+                startInfo.Environment.Remove(variable);
+        }
+
         return startInfo;
     }
 
@@ -41,9 +57,15 @@ internal static class ProcessRunner
         string fileName,
         IEnumerable<string> arguments,
         CancellationToken cancellationToken,
-        bool redirectOutput = true)
+        bool redirectOutput = true,
+        TimeSpan? timeout = null,
+        string? standardInput = null)
     {
         ProcessStartInfo startInfo = CreateStartInfo(fileName, arguments, redirectOutput);
+        if (standardInput is not null)
+            startInfo.RedirectStandardInput = true;
+
+        TimeSpan effectiveTimeout = timeout ?? DefaultCommandTimeout;
 
         try
         {
@@ -51,17 +73,46 @@ internal static class ProcessRunner
             if (!process.Start())
                 throw new IOException($"Failed to start required command '{fileName}'.");
 
-            Task<string> stdout = redirectOutput ? process.StandardOutput.ReadToEndAsync(cancellationToken) : Task.FromResult(string.Empty);
-            Task<string> stderr = redirectOutput ? process.StandardError.ReadToEndAsync(cancellationToken) : Task.FromResult(string.Empty);
+            using CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(effectiveTimeout);
+
+            if (standardInput is not null)
+            {
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), timeoutSource.Token);
+                await process.StandardInput.FlushAsync(timeoutSource.Token);
+                process.StandardInput.Close();
+            }
+
+            Task<string> stdout = redirectOutput
+                ? process.StandardOutput.ReadToEndAsync(timeoutSource.Token)
+                : Task.FromResult(string.Empty);
+            Task<string> stderr = redirectOutput
+                ? process.StandardError.ReadToEndAsync(timeoutSource.Token)
+                : Task.FromResult(string.Empty);
 
             try
             {
-                await process.WaitForExitAsync(cancellationToken);
+                await process.WaitForExitAsync(timeoutSource.Token);
             }
             catch (OperationCanceledException)
             {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
+                TryKill(process);
+                try
+                {
+                    await process.WaitForExitAsync(CancellationToken.None);
+                    await Task.WhenAll(stdout, stderr);
+                }
+                catch (Exception)
+                {
+                    // The command was killed; its output is no longer needed.
+                }
+
+                if (!cancellationToken.IsCancellationRequested && timeoutSource.IsCancellationRequested)
+                {
+                    throw new TimeoutException(
+                        $"Command '{fileName}' did not finish within {effectiveTimeout}.");
+                }
+
                 throw;
             }
 
@@ -75,17 +126,82 @@ internal static class ProcessRunner
 
     internal static string RequireExecutable(string command)
     {
-        if (Path.IsPathFullyQualified(command) && File.Exists(command))
-            return command;
+        if (Path.IsPathFullyQualified(command))
+            return ValidateExecutable(command);
 
-        string? path = Environment.GetEnvironmentVariable("PATH");
-        foreach (string directory in (path ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        IEnumerable<string> directories = OperatingSystem.IsLinux() && LinuxNative.GetEffectiveUserId() == 0
+            ? SystemSearchPath
+            : TrustedPathDirectories();
+
+        foreach (string directory in directories)
         {
             string candidate = Path.Combine(directory, command);
             if (File.Exists(candidate))
-                return candidate;
+                return ValidateExecutable(candidate);
         }
 
-        throw new IOException($"Required command '{command}' is not installed or is not on PATH.");
+        throw new IOException($"Required command '{command}' is not installed or is not on a trusted PATH.");
+    }
+
+    internal static string RequireSystemExecutable(string command)
+    {
+        foreach (string directory in SystemSearchPath)
+        {
+            string candidate = Path.Combine(directory, command);
+            if (File.Exists(candidate))
+                return ValidateExecutable(candidate);
+        }
+
+        throw new IOException($"Required command '{command}' is not installed in a system directory.");
+    }
+
+    private static IEnumerable<string> TrustedPathDirectories()
+    {
+        string? path = Environment.GetEnvironmentVariable("PATH");
+        foreach (string entry in (path ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            // A relative entry (including "." and "") lets the working directory
+            // shadow a system binary.
+            if (Path.IsPathFullyQualified(entry))
+                yield return entry;
+        }
+    }
+
+    private static string ValidateExecutable(string path)
+    {
+        FileInfo info = new(path);
+        if (!info.Exists)
+            throw new IOException($"Required command '{path}' does not exist.");
+        if ((info.Attributes & FileAttributes.Directory) != 0)
+            throw new IOException($"Required command '{path}' is a directory.");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode mode = File.GetUnixFileMode(path);
+            if ((mode & (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            {
+                throw new IOException(
+                    $"Required command '{path}' is writable by other users and will not be executed.");
+            }
+            if ((mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) == 0)
+                throw new IOException($"Required command '{path}' is not executable.");
+        }
+
+        return path;
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+        catch (Win32Exception)
+        {
+        }
     }
 }

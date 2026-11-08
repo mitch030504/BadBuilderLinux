@@ -13,7 +13,8 @@ internal static class LinuxDiskHelper
         LinuxHelperResponse response;
         try
         {
-            HelperRequest request = ParseRequest(arguments);
+            string token = (Console.In.ReadLine() ?? string.Empty).Trim();
+            HelperRequest request = ParseRequest(arguments, token);
             ValidateExecutionContext(request);
             response = request.Operation switch
             {
@@ -32,12 +33,12 @@ internal static class LinuxDiskHelper
         return response.Success ? 0 : 4;
     }
 
-    internal static HelperRequest ParseRequest(IReadOnlyList<string> arguments)
+    internal static HelperRequest ParseRequest(IReadOnlyList<string> arguments, string? token = null)
     {
         if (arguments.Count == 0 || arguments[0] is not ("prepare" or "finalize"))
             throw new ArgumentException("The disk helper requires exactly one operation: prepare or finalize.");
 
-        HashSet<string> allowed = ["--device", "--fingerprint", "--uid", "--gid", "--token", "--mount", "--workspace", "--cache"];
+        HashSet<string> allowed = ["--device", "--fingerprint", "--uid", "--gid", "--mount", "--workspace", "--cache"];
         Dictionary<string, string> values = new(StringComparer.Ordinal);
 
         for (int index = 1; index < arguments.Count; index += 2)
@@ -54,7 +55,6 @@ internal static class LinuxDiskHelper
 
         string device = GetRequired("--device");
         string fingerprint = GetRequired("--fingerprint");
-        string token = GetRequired("--token");
         string workspace = GetRequired("--workspace");
         string cache = GetRequired("--cache");
 
@@ -62,8 +62,8 @@ internal static class LinuxDiskHelper
             throw new ArgumentException("The disk-helper device must be an absolute /dev path.");
         if (fingerprint.Length != 64 || !fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("The disk-helper fingerprint is invalid.");
-        if (token.Length != 32 || !token.All(Uri.IsHexDigit))
-            throw new ArgumentException("The disk-helper token is invalid.");
+        if (string.IsNullOrWhiteSpace(token) || token.Length != 32 || !token.All(Uri.IsHexDigit))
+            throw new ArgumentException("The disk-helper token must be supplied on standard input.");
         if (!uint.TryParse(GetRequired("--uid"), NumberStyles.None, CultureInfo.InvariantCulture, out uint uid) || uid == 0)
             throw new ArgumentException("The disk-helper caller UID is invalid.");
         if (!uint.TryParse(GetRequired("--gid"), NumberStyles.None, CultureInfo.InvariantCulture, out uint gid))
@@ -106,6 +106,40 @@ internal static class LinuxDiskHelper
         string? sudoGidText = Environment.GetEnvironmentVariable("SUDO_GID");
         if (!uint.TryParse(sudoGidText, NumberStyles.None, CultureInfo.InvariantCulture, out uint sudoGid) || sudoGid != request.Gid)
             throw new UnauthorizedAccessException("The disk helper caller does not match SUDO_GID.");
+
+        EnsureExecutableIsNotCallerWritable(request);
+    }
+
+    private static void EnsureExecutableIsNotCallerWritable(HelperRequest request)
+    {
+        string? processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+            throw new UnauthorizedAccessException("The disk helper executable path is unavailable.");
+
+        HashSet<string> paths = new(StringComparer.Ordinal) { Path.GetFullPath(processPath) };
+        if (!string.IsNullOrWhiteSpace(AppContext.BaseDirectory))
+            paths.Add(Path.GetFullPath(AppContext.BaseDirectory));
+        string? directory = Path.GetDirectoryName(Path.GetFullPath(processPath));
+        if (!string.IsNullOrWhiteSpace(directory))
+            paths.Add(directory);
+
+        foreach (string path in paths)
+        {
+            if (!LinuxNative.TryGetOwner(path, out uint owner, out uint group, out ushort mode))
+                throw new UnauthorizedAccessException($"Could not verify ownership of {path}.");
+
+            // mode carries the full st_mode; 0x80/0x10/0x2 are owner/group/other write.
+            bool writableByCaller =
+                (owner == request.Uid && (mode & 0x80) != 0) ||
+                (group == request.Gid && (mode & 0x10) != 0) ||
+                (mode & 0x2) != 0;
+
+            if (writableByCaller)
+            {
+                throw new UnauthorizedAccessException(
+                    $"The disk helper is installed somewhere the caller can modify: {path}. Install it root-owned before granting sudo.");
+            }
+        }
     }
 
     private static async Task<LinuxHelperResponse> PrepareAsync(HelperRequest request)
@@ -116,10 +150,18 @@ internal static class LinuxDiskHelper
         string lockPath = GetLockPath(request.Fingerprint);
 
         await using FileStream operationLock = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        if (File.Exists(leasePath))
+        if (File.Exists(leasePath) && !await TryClearStaleLeaseAsync(leasePath, request))
             throw new DiskSafetyException($"Another BadBuilder operation already owns {request.Device}. Finalize it before retrying.");
 
-        LeaseRecord lease = new(request.Device, request.Fingerprint, request.Uid, request.Gid, request.Token, GetExpectedMount(request.Uid, request.Token));
+        LeaseRecord lease = new(
+            request.Device,
+            request.Fingerprint,
+            request.Uid,
+            request.Gid,
+            request.Token,
+            GetExpectedMount(request.Uid, request.Token),
+            Environment.ProcessId,
+            ReadBootId());
         await CreateLeaseAsync(leasePath, lease);
 
         bool mounted = false;
@@ -186,8 +228,16 @@ internal static class LinuxDiskHelper
 
             if (!mounted)
             {
-                DeleteEmptyMountDirectories(lease.MountRoot, request.Uid);
+                // Delete the lease before directory cleanup: a non-empty mount
+                // directory must never keep the device permanently locked.
                 File.Delete(leasePath);
+                try
+                {
+                    DeleteEmptyMountDirectories(lease.MountRoot, request.Uid);
+                }
+                catch (Exception cleanupError) when (cleanupError is IOException or UnauthorizedAccessException)
+                {
+                }
             }
             else
             {
@@ -480,6 +530,64 @@ internal static class LinuxDiskHelper
     private static string GetLockPath(string fingerprint) =>
         Path.Combine("/run/lock", $"badbuilder-{fingerprint[..24].ToLowerInvariant()}.lock");
 
+    /// <summary>
+    /// Clears a lease left behind by a helper that was killed. The lease is only
+    /// released when it belongs to the same caller, the owning process is gone,
+    /// and any mount it left behind can be unmounted.
+    /// </summary>
+    private static async Task<bool> TryClearStaleLeaseAsync(string leasePath, HelperRequest request)
+    {
+        LeaseRecord lease;
+        try
+        {
+            lease = await ReadLeaseAsync(leasePath);
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException)
+        {
+            return false;
+        }
+
+        if (lease.Uid != request.Uid)
+            return false;
+
+        bool sameBoot = string.Equals(lease.BootId, ReadBootId(), StringComparison.Ordinal);
+        bool processAlive = sameBoot && lease.Pid > 0 && Directory.Exists($"/proc/{lease.Pid}");
+        if (processAlive)
+            return false;
+
+        if (await IsMountedAsync(lease.MountRoot, CancellationToken.None))
+        {
+            ProcessResult unmount = await ProcessRunner.RunAsync(
+                ProcessRunner.RequireExecutable("umount"), ["--", lease.MountRoot], CancellationToken.None);
+            if (unmount.ExitCode != 0)
+                return false;
+        }
+
+        File.Delete(leasePath);
+        try
+        {
+            DeleteEmptyMountDirectories(lease.MountRoot, lease.Uid);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+        return true;
+    }
+
+    private static string ReadBootId()
+    {
+        try
+        {
+            return File.Exists("/proc/sys/kernel/random/boot_id")
+                ? File.ReadAllText("/proc/sys/kernel/random/boot_id").Trim()
+                : string.Empty;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
+        }
+    }
+
     private static void EnsureCommands(params string[] commands)
     {
         foreach (string command in commands)
@@ -504,7 +612,9 @@ internal sealed record LeaseRecord(
     uint Uid,
     uint Gid,
     string Token,
-    string MountRoot)
+    string MountRoot,
+    int Pid,
+    string BootId)
 {
     internal bool Matches(HelperRequest request) =>
         string.Equals(Device, request.Device, StringComparison.Ordinal) &&

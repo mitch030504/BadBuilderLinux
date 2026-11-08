@@ -201,11 +201,39 @@ public sealed class LinuxDiskInventoryTests
     [Fact]
     public void HelperParser_RejectsUnknownOperationsAndArguments()
     {
-        Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest(["wipe"]));
+        string token = new('b', 32);
+
+        Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest(["wipe"], token));
         Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest([
             "prepare", "--device", "/dev/sdb", "--fingerprint", new string('A', 64),
-            "--uid", "1000", "--gid", "1000", "--token", new string('b', 32),
-            "--workspace", "/work", "--cache", "/cache", "--force", "true"]));
+            "--uid", "1000", "--gid", "1000",
+            "--workspace", "/work", "--cache", "/cache", "--force", "true"], token));
+        // The cleanup token must never be passed on the command line.
+        Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest([
+            "prepare", "--device", "/dev/sdb", "--fingerprint", new string('A', 64),
+            "--uid", "1000", "--gid", "1000", "--token", token,
+            "--workspace", "/work", "--cache", "/cache"], token));
+        // A missing or malformed stdin token is rejected.
+        Assert.Throws<ArgumentException>(() => LinuxDiskHelper.ParseRequest([
+            "prepare", "--device", "/dev/sdb", "--fingerprint", new string('A', 64),
+            "--uid", "1000", "--gid", "1000",
+            "--workspace", "/work", "--cache", "/cache"], null));
+    }
+
+    [Fact]
+    public void HelperParser_AcceptsAWellFormedPrepareRequest()
+    {
+        string token = new('b', 32);
+
+        HelperRequest request = LinuxDiskHelper.ParseRequest([
+            "prepare", "--device", "/dev/sdb", "--fingerprint", new string('A', 64),
+            "--uid", "1000", "--gid", "1000",
+            "--workspace", "/work", "--cache", "/cache"], token);
+
+        Assert.Equal("prepare", request.Operation);
+        Assert.Equal("/dev/sdb", request.Device);
+        Assert.Equal(token, request.Token);
+        Assert.Null(request.Mount);
     }
 
     [Fact]
