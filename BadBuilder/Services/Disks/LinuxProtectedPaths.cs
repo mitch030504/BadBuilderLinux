@@ -4,12 +4,23 @@ namespace BadBuilder.Services.Disks;
 
 internal static class LinuxProtectedPaths
 {
+    // Any disk backing a mount at (or above) one of these paths must never be
+    // offered as a target. "/" alone protects the root disk; the rest protect
+    // separate system volumes such as /srv, /var or /efi.
+    private static readonly string[] SystemRoots =
+    [
+        "/", "/boot", "/boot/efi", "/efi", "/home", "/root", "/srv", "/var",
+        "/usr", "/opt", "/etc", "/tmp", "/run", "/snap", "/nix", "/lib", "/lib64",
+    ];
+
     internal static IReadOnlyList<string> ForApplication() =>
         Resolve([
             AppPaths.WorkspaceRoot,
             AppPaths.CacheRoot,
             AppContext.BaseDirectory,
             AppPaths.HomeRoot,
+            ..SystemRoots,
+            ..AllHomeDirectories(),
         ]);
 
     internal static IReadOnlyList<string> ForHelper(
@@ -21,7 +32,23 @@ internal static class LinuxProtectedPaths
             cacheRoot ?? AppPaths.CacheRoot,
             AppContext.BaseDirectory,
             LinuxUserHome.Resolve(uid),
+            ..SystemRoots,
+            ..AllHomeDirectories(),
         ]);
+
+    internal static IReadOnlyList<string> AllHomeDirectories()
+    {
+        try
+        {
+            return File.Exists("/etc/passwd")
+                ? LinuxUserHome.ParsePasswdHomes(File.ReadAllText("/etc/passwd"))
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
 
     internal static IReadOnlyList<string> Resolve(IEnumerable<string> paths)
     {
@@ -147,5 +174,26 @@ internal static class LinuxUserHome
         }
 
         return null;
+    }
+
+    internal static IReadOnlyList<string> ParsePasswdHomes(string passwd)
+    {
+        List<string> homes = [];
+        foreach (string line in passwd.Split('\n'))
+        {
+            string entry = line.TrimEnd('\r');
+            if (entry.Length == 0 || entry[0] == '#')
+                continue;
+
+            string[] fields = entry.Split(':');
+            if (fields.Length >= 7 &&
+                !string.IsNullOrWhiteSpace(fields[5]) &&
+                Path.IsPathFullyQualified(fields[5]))
+            {
+                homes.Add(fields[5]);
+            }
+        }
+
+        return homes;
     }
 }

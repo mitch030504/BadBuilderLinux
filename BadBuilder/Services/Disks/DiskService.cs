@@ -97,7 +97,16 @@ internal interface IDiskBackend
     Task<FinalizeResult> FinalizeAsync(PreparedTarget target, CancellationToken cancellationToken);
 }
 
-internal sealed class DiskSafetyException(string message) : IOException(message);
+internal sealed class DiskSafetyException : IOException
+{
+    internal DiskSafetyException(string message) : base(message)
+    {
+    }
+
+    internal DiskSafetyException(string message, Exception innerException) : base(message, innerException)
+    {
+    }
+}
 
 internal static class DiskService
 {

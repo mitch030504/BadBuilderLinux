@@ -66,6 +66,33 @@ internal static partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "chown", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     private static partial int ChangeOwnerNative(string path, uint owner, uint group);
 
+    [LibraryImport("libc", EntryPoint = "open", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int OpenNative(string path, int flags);
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int IoctlUInt64(int fd, nuint request, out ulong value);
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int IoctlNoArgument(int fd, nuint request);
+
+    private const int OpenReadWrite = 0x2;
+    private const int OpenExclusive = 0x80;
+    private const int OpenCloseOnExec = 0x80000;
+    private const nuint BlockGetSize64 = 0x80081272;
+    private const nuint BlockRereadPartitions = 0x125f;
+
+    internal static int OpenDeviceExclusive(string path) =>
+        OpenNative(path, OpenReadWrite | OpenExclusive | OpenCloseOnExec);
+
+    internal static long GetDeviceSize(int fd)
+    {
+        if (IoctlUInt64(fd, BlockGetSize64, out ulong size) != 0)
+            throw new IOException($"Could not read the device size. OS error {Marshal.GetLastPInvokeError()}.");
+        return checked((long)size);
+    }
+
+    internal static int RereadPartitions(int fd) => IoctlNoArgument(fd, BlockRereadPartitions);
+
     internal static void ChangeOwner(string path, uint owner, uint group)
     {
         if (ChangeOwnerNative(path, owner, group) != 0)
@@ -78,7 +105,7 @@ internal static class LinuxDiskEnumerator
     internal static readonly string[] LsblkArguments =
     [
         "--json", "--bytes", "--paths",
-        "--output", "NAME,KNAME,PATH,PKNAME,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,RM,HOTPLUG,RO,FSTYPE,LABEL,MOUNTPOINTS",
+        "--output", "NAME,KNAME,PATH,PKNAME,TYPE,SIZE,MODEL,SERIAL,WWN,TRAN,RM,HOTPLUG,RO,FSTYPE,LABEL,UUID,MD_UUID,MOUNTPOINTS",
     ];
 
     internal static readonly string[] FindmntArguments = ["--json", "--real", "--output", "SOURCE,TARGET"];
@@ -101,7 +128,12 @@ internal static class LinuxDiskEnumerator
             ? await File.ReadAllTextAsync("/proc/swaps", cancellationToken)
             : string.Empty;
 
-        return LinuxDiskInventory.Parse(lsblkResult.StandardOutput, findmntResult.StandardOutput, swaps, protectedPaths);
+        return LinuxDiskInventory.Parse(
+            lsblkResult.StandardOutput,
+            findmntResult.StandardOutput,
+            swaps,
+            protectedPaths,
+            LinuxStableId.TryGet);
     }
 }
 

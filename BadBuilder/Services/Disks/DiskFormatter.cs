@@ -71,6 +71,33 @@ internal static class DiskFormatter
         return true;
     }
 
+    /// <summary>
+    /// Removes the MBR, both GPT areas, and any filesystem signature at the start
+    /// of the disk. DiscUtils only rewrites sector 0, so without this a previously
+    /// GPT-formatted stick keeps a valid backup header and old partition entries.
+    /// </summary>
+    internal static void EraseSignatures(Stream stream, long diskSize)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (!IsSupportedDiskSize(diskSize))
+            throw new DiskSafetyException("The selected disk is outside the supported 1 GiB to 1 TiB MBR/FAT32 size range.");
+
+        const int BlockSize = 1024 * 1024;
+        byte[] zeros = new byte[BlockSize];
+
+        stream.Position = 0;
+        stream.Write(zeros, 0, (int)Math.Min(BlockSize, diskSize));
+
+        if (diskSize > BlockSize)
+        {
+            long tailOffset = Math.Max(BlockSize, diskSize - BlockSize);
+            stream.Position = tailOffset;
+            stream.Write(zeros, 0, (int)Math.Min(BlockSize, diskSize - tailOffset));
+        }
+
+        stream.Flush();
+    }
+
     internal static void FormatFat32(Stream stream, long diskSize)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -79,6 +106,7 @@ internal static class DiskFormatter
         if (!IsSupportedDiskSize(diskSize))
             throw new DiskSafetyException("The selected disk is outside the supported 1 GiB to 1 TiB MBR/FAT32 size range.");
 
+        stream.Position = 0;
         using LengthBoundStream bounded = new(stream, diskSize, leaveOpen: true);
         using Disk disk = new(bounded, Ownership.None);
 
@@ -156,12 +184,41 @@ internal static class DiskFormatter
         public override long Position { get => inner.Position; set => inner.Position = value; }
         public override void Flush() => inner.Flush();
         public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
-        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
-        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+
+        private long Remaining => Math.Max(0, length - Position);
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            int allowed = (int)Math.Min(count, Remaining);
+            return allowed == 0 ? 0 : inner.Read(buffer, offset, allowed);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            int allowed = (int)Math.Min(buffer.Length, Remaining);
+            return allowed == 0 ? 0 : inner.Read(buffer[..allowed]);
+        }
+
         public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
         public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
-        public override void Write(ReadOnlySpan<byte> buffer) => inner.Write(buffer);
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            EnsureWritable(count);
+            inner.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            EnsureWritable(buffer.Length);
+            inner.Write(buffer);
+        }
+
+        private void EnsureWritable(int count)
+        {
+            if (Position + count > length)
+                throw new IOException("A write attempted to exceed the declared disk length.");
+        }
 
         protected override void Dispose(bool disposing)
         {

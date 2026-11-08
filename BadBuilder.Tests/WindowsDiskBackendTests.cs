@@ -83,6 +83,15 @@ public sealed class WindowsDiskBackendTests
     }
 
     [Theory]
+    [InlineData(@"E:\", @"\\.\E:")]
+    [InlineData(@"E:", @"\\.\E:")]
+    [InlineData(@"\\?\Volume{11111111-2222-3333-4444-555555555555}\", @"\\.\Volume{11111111-2222-3333-4444-555555555555}")]
+    public void ToDevicePath_NormalizesDriveLettersAndVolumeGuids(string accessPath, string expected)
+    {
+        Assert.Equal(expected, WindowsDiskBackend.ToDevicePath(accessPath));
+    }
+
+    [Theory]
     [InlineData(@"\\.\PhysicalDrive0", 0)]
     [InlineData(@"\\.\PhysicalDrive15", 15)]
     [InlineData(@"\\?\PhysicalDrive3", 3)]

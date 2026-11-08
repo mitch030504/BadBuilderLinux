@@ -2,6 +2,7 @@ using System.Management;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using Microsoft.Win32.SafeHandles;
 
 namespace BadBuilder.Services.Disks;
@@ -25,6 +26,13 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
             using (drive)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (drive["Index"] is null)
+                {
+                    // Convert.ToInt32(null) returns 0, which would silently map an
+                    // unknown disk onto PhysicalDrive0.
+                    continue;
+                }
+
                 int index = Convert.ToInt32(drive["Index"], CultureInfo.InvariantCulture);
                 if (systemDisks.Contains(index))
                     continue;
@@ -32,8 +40,11 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
                 string deviceId = Convert.ToString(drive["DeviceID"], CultureInfo.InvariantCulture) ?? $@"\\.\PhysicalDrive{index}";
                 string model = Convert.ToString(drive["Model"], CultureInfo.InvariantCulture)?.Trim() ?? $"Disk {index}";
                 string? serial = Convert.ToString(drive["SerialNumber"], CultureInfo.InvariantCulture)?.Trim();
+                ModernDiskFlags? flags = modernFlags.GetValueOrDefault(index);
                 string? wwn = null;
-                string? stableId = Convert.ToString(drive["PNPDeviceID"], CultureInfo.InvariantCulture)?.Trim();
+                string? stableId = flags?.UniqueId;
+                if (string.IsNullOrWhiteSpace(stableId))
+                    stableId = Convert.ToString(drive["PNPDeviceID"], CultureInfo.InvariantCulture)?.Trim();
                 long size = drive["Size"] is null ? 0 : Convert.ToInt64(drive["Size"], CultureInfo.InvariantCulture);
                 string transport = Convert.ToString(drive["InterfaceType"], CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
                 string mediaType = Convert.ToString(drive["MediaType"], CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
@@ -43,10 +54,17 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
                     mediaType.Contains("Removable", StringComparison.OrdinalIgnoreCase);
 
                 // Fixed SATA/NVMe disks are intentionally never offered, even if manually selected elsewhere.
-                bool readOnly = modernFlags.GetValueOrDefault(index)?.IsReadOnly ?? false;
-                bool offline = modernFlags.GetValueOrDefault(index)?.IsOffline ?? false;
+                bool readOnly = flags?.IsReadOnly ?? false;
+                bool offline = flags?.IsOffline ?? false;
                 if (!removable || readOnly || offline || !DiskFormatter.IsSupportedDiskSize(size))
                     continue;
+
+                if (string.IsNullOrWhiteSpace(serial) &&
+                    string.IsNullOrWhiteSpace(wwn) &&
+                    string.IsNullOrWhiteSpace(stableId))
+                {
+                    continue;
+                }
 
                 DiskIdentity identity = DiskIdentity.Create(deviceId, model, serial, wwn, size, transport, stableId);
                 disks.Add(new DiskInfo(identity, IsRemovable: true, IsHotPlug: true, IsReadOnly: readOnly, GetVolumes(index)));
@@ -78,8 +96,16 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
 
         try
         {
-            foreach (string driveLetter in EnumerateDriveLetters(diskIndex))
-                locks.Add(VolumeLock.Create(driveLetter));
+            List<string> accessPaths = GetVolumeAccessPaths(diskIndex);
+            int partitionCount = GetVolumes(diskIndex).Count;
+            if (partitionCount > 0 && accessPaths.Count == 0)
+            {
+                throw new DiskSafetyException(
+                    $"Windows did not report any volume access paths for {current.DevicePath}, so its volumes cannot be locked.");
+            }
+
+            foreach (string accessPath in accessPaths)
+                locks.Add(VolumeLock.Create(accessPath));
 
             // Revalidate after all associated volumes are locked to narrow disconnect/replug races.
             await RevalidateAsync(selected, cancellationToken);
@@ -107,13 +133,67 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
         }
 
         string mountRoot = await RefreshAndFindDriveLetterAsync(current.Identity, cancellationToken);
-        return new PreparedTarget(mountRoot, current.Identity, "windows", string.Empty, RequiresFinalize: false);
+        string cleanupToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        return new PreparedTarget(mountRoot, current.Identity, "windows", cleanupToken, RequiresFinalize: true);
     }
 
     public Task<FinalizeResult> FinalizeAsync(PreparedTarget target, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new FinalizeResult(Success: true));
+
+        try
+        {
+            using SafeFileHandle handle = CreateFile(
+                ToDevicePath(target.MountRoot),
+                GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                IntPtr.Zero,
+                OPEN_EXISTING,
+                0,
+                IntPtr.Zero);
+
+            if (handle.IsInvalid)
+            {
+                return Task.FromResult(new FinalizeResult(
+                    false,
+                    Error: $"Could not open {target.MountRoot} to flush it. Win32 error {Marshal.GetLastWin32Error()}."));
+            }
+
+            if (!FlushFileBuffers(handle))
+            {
+                return Task.FromResult(new FinalizeResult(
+                    false,
+                    Error: $"Could not flush {target.MountRoot}. Win32 error {Marshal.GetLastWin32Error()}."));
+            }
+
+            return Task.FromResult(new FinalizeResult(true));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Task.FromResult(new FinalizeResult(false, Error: ex.Message));
+        }
+    }
+
+    private static List<string> GetVolumeAccessPaths(int diskIndex)
+    {
+        List<string> paths = [];
+        ManagementScope scope = new(@"\\.\root\Microsoft\Windows\Storage");
+        scope.Connect();
+        using ManagementObjectSearcher searcher = new(
+            scope,
+            new ObjectQuery($"SELECT AccessPaths FROM MSFT_Partition WHERE DiskNumber = {diskIndex}"));
+        using ManagementObjectCollection partitions = searcher.Get();
+
+        foreach (ManagementObject partition in partitions)
+        {
+            using (partition)
+            {
+                if (partition["AccessPaths"] is string[] accessPaths)
+                    paths.AddRange(accessPaths.Where(path => !string.IsNullOrWhiteSpace(path)));
+            }
+        }
+
+        return paths;
     }
 
     private async Task<string> RefreshAndFindDriveLetterAsync(DiskIdentity expected, CancellationToken cancellationToken)
@@ -244,24 +324,31 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
             scope.Connect();
             using ManagementObjectSearcher searcher = new(
                 scope,
-                new ObjectQuery("SELECT Number, IsReadOnly, IsOffline, IsSystem, IsBoot FROM MSFT_Disk"));
+                new ObjectQuery("SELECT Number, IsReadOnly, IsOffline, IsSystem, IsBoot, UniqueId FROM MSFT_Disk"));
             using ManagementObjectCollection disks = searcher.Get();
             foreach (ManagementObject disk in disks)
             {
                 using (disk)
                 {
+                    if (disk["Number"] is null)
+                        continue;
                     int number = Convert.ToInt32(disk["Number"], CultureInfo.InvariantCulture);
                     result[number] = new ModernDiskFlags(
                         Convert.ToBoolean(disk["IsReadOnly"], CultureInfo.InvariantCulture),
                         Convert.ToBoolean(disk["IsOffline"], CultureInfo.InvariantCulture),
                         Convert.ToBoolean(disk["IsSystem"], CultureInfo.InvariantCulture),
-                        Convert.ToBoolean(disk["IsBoot"], CultureInfo.InvariantCulture));
+                        Convert.ToBoolean(disk["IsBoot"], CultureInfo.InvariantCulture),
+                        Convert.ToString(disk["UniqueId"], CultureInfo.InvariantCulture)?.Trim());
                 }
             }
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException or COMException)
         {
-            // Win32_OperatingSystem ancestry remains the fail-safe system-disk check on older Windows editions.
+            // Without MSFT_Disk the system-disk and read-only flags cannot be
+            // trusted, so refuse to offer any disk rather than guess.
+            throw new DiskSafetyException(
+                "Windows storage metadata (MSFT_Disk) is unavailable, so no target disks will be offered.",
+                ex);
         }
         return result;
     }
@@ -306,8 +393,15 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
         return volumes;
     }
 
-    private static IEnumerable<string> EnumerateDriveLetters(int diskIndex) =>
-        GetVolumes(diskIndex).SelectMany(volume => volume.MountPoints).Select(path => path.TrimEnd(Path.DirectorySeparatorChar));
+    internal static string ToDevicePath(string accessPath)
+    {
+        string trimmed = accessPath.TrimEnd('\\', '/');
+        if (trimmed.Length == 2 && char.IsAsciiLetter(trimmed[0]) && trimmed[1] == ':')
+            return $@"\\.\{trimmed}";
+        if (trimmed.StartsWith(@"\\?\Volume", StringComparison.OrdinalIgnoreCase))
+            return @"\\.\" + trimmed[4..];
+        return $@"\\.\{trimmed}";
+    }
 
     internal static int ParseDiskIndex(string devicePath)
     {
@@ -354,16 +448,21 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
         out uint lpBytesReturned,
         IntPtr lpOverlapped);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "FlushFileBuffers", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool FlushFileBuffers(SafeFileHandle hFile);
+
     private sealed class VolumeLock : IDisposable
     {
         private readonly SafeFileHandle _handle;
 
         private VolumeLock(SafeFileHandle handle) => _handle = handle;
 
-        internal static VolumeLock Create(string driveLetter)
+        internal static VolumeLock Create(string accessPath)
         {
+            string devicePath = ToDevicePath(accessPath);
             SafeFileHandle handle = CreateFile(
-                $@"\\.\{driveLetter.TrimEnd('\\')}",
+                devicePath,
                 GENERIC_READ | GENERIC_WRITE,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 IntPtr.Zero,
@@ -375,21 +474,21 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
             {
                 int error = Marshal.GetLastWin32Error();
                 handle.Dispose();
-                throw new IOException($"Could not open volume {driveLetter} for locking. Win32 error {error}.");
+                throw new IOException($"Could not open volume {accessPath} for locking. Win32 error {error}.");
             }
 
             if (!DeviceIoControl(handle, FSCTL_LOCK_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
             {
                 int error = Marshal.GetLastWin32Error();
                 handle.Dispose();
-                throw new IOException($"Could not lock volume {driveLetter}. Close applications using it and retry. Win32 error {error}.");
+                throw new IOException($"Could not lock volume {accessPath}. Close applications using it and retry. Win32 error {error}.");
             }
 
             if (!DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, IntPtr.Zero, 0, IntPtr.Zero, 0, out _, IntPtr.Zero))
             {
                 int error = Marshal.GetLastWin32Error();
                 handle.Dispose();
-                throw new IOException($"Could not dismount volume {driveLetter}. Win32 error {error}.");
+                throw new IOException($"Could not dismount volume {accessPath}. Win32 error {error}.");
             }
 
             return new VolumeLock(handle);
@@ -398,5 +497,10 @@ internal sealed partial class WindowsDiskBackend : IDiskBackend
         public void Dispose() => _handle.Dispose();
     }
 
-    private sealed record ModernDiskFlags(bool IsReadOnly, bool IsOffline, bool IsSystem, bool IsBoot);
+    private sealed record ModernDiskFlags(
+        bool IsReadOnly,
+        bool IsOffline,
+        bool IsSystem,
+        bool IsBoot,
+        string? UniqueId);
 }

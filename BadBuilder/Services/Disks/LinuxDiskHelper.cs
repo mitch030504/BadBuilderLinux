@@ -110,7 +110,7 @@ internal static class LinuxDiskHelper
 
     private static async Task<LinuxHelperResponse> PrepareAsync(HelperRequest request)
     {
-        EnsureCommands("lsblk", "findmnt", "umount", "wipefs", "blockdev", "mount");
+        EnsureCommands("lsblk", "findmnt", "umount", "mount");
         DiskInfo disk = await RevalidateAsync(request, CancellationToken.None);
         string leasePath = GetLeasePath(request.Fingerprint);
         string lockPath = GetLockPath(request.Fingerprint);
@@ -127,25 +127,18 @@ internal static class LinuxDiskHelper
         {
             disk = await UnmountChildVolumesAsync(request, disk);
 
-            ProcessResult wipe = await ProcessRunner.RunAsync(
-                ProcessRunner.RequireExecutable("wipefs"), ["--all", "--", request.Device], CancellationToken.None);
-            wipe.EnsureSuccess($"Wiping old filesystem signatures on {request.Device}");
-
-            await using (FileStream stream = new(
-                request.Device,
-                FileMode.Open,
-                FileAccess.ReadWrite,
-                FileShare.ReadWrite,
-                bufferSize: 4096,
-                FileOptions.WriteThrough))
+            using (ExclusiveDeviceHandle device = ExclusiveDeviceHandle.Open(request.Device, disk.Size))
             {
-                DiskFormatter.FormatFat32(stream, disk.Size);
-                stream.Flush(flushToDisk: true);
-            }
+                // Revalidate while the exclusive handle is held: a device swapped in
+                // between the first check and the open is detected here, and the size
+                // check is bound to the handle rather than to the path.
+                disk = await RevalidateAsync(request, CancellationToken.None);
 
-            ProcessResult reread = await ProcessRunner.RunAsync(
-                ProcessRunner.RequireExecutable("blockdev"), BuildBlockdevRereadArguments(request.Device), CancellationToken.None);
-            reread.EnsureSuccess($"Refreshing the partition table on {request.Device}");
+                DiskFormatter.EraseSignatures(device.Stream, disk.Size);
+                DiskFormatter.FormatFat32(device.Stream, disk.Size);
+                device.Stream.Flush(flushToDisk: true);
+                device.RereadPartitionTable();
+            }
 
             await SettleDevicesAsync();
             string partition = await WaitForSinglePartitionAsync(request, CancellationToken.None);

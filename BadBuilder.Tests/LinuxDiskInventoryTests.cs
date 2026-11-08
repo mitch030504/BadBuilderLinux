@@ -208,6 +208,176 @@ public sealed class LinuxDiskInventoryTests
             "--workspace", "/work", "--cache", "/cache", "--force", "true"]));
     }
 
+    [Fact]
+    public void Parse_ExcludesHotPlugOnlyInternalDisk()
+    {
+        const string json =
+            """
+            {
+              "blockdevices": [
+                {
+                  "name":"/dev/sda","kname":"sda","path":"/dev/sda","type":"disk","size":1000000000,
+                  "model":"Internal SATA","serial":"SATA1","tran":"sata","rm":false,"hotplug":true,"ro":false
+                }
+              ]
+            }
+            """;
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            json,
+            "{\"filesystems\":[]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_ExcludesUsbDiskWithoutSerialWwnOrStableId()
+    {
+        const string json =
+            """
+            {
+              "blockdevices": [
+                {
+                  "name":"/dev/sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":2000000000,
+                  "model":"Anonymous USB","tran":"usb","rm":true,"ro":false
+                }
+              ]
+            }
+            """;
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            json,
+            "{\"filesystems\":[]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_AcceptsUsbDiskIdentifiedByStableId()
+    {
+        const string json =
+            """
+            {
+              "blockdevices": [
+                {
+                  "name":"/dev/sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":2000000000,
+                  "model":"Anonymous USB","tran":"usb","rm":true,"ro":false
+                }
+              ]
+            }
+            """;
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            json,
+            "{\"filesystems\":[]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"],
+            _ => "usb-Generic_Flash_Disk-0:0");
+
+        DiskInfo disk = Assert.Single(inventory.EligibleDisks);
+        Assert.Equal("/dev/sdb", disk.DevicePath);
+    }
+
+    [Fact]
+    public void Identity_StableIdSurvivesDeviceRenumbering()
+    {
+        DiskIdentity first = DiskIdentity.Create("/dev/sdb", "USB", null, null, 1_000_000, "usb", "usb-port-1");
+        DiskIdentity second = DiskIdentity.Create("/dev/sdc", "USB", null, null, 1_000_000, "usb", "usb-port-1");
+
+        Assert.Equal(first.Fingerprint, second.Fingerprint);
+        Assert.False(first.IsExactMatch(second));
+    }
+
+    [Fact]
+    public void Parse_ExcludesEveryMemberOfProtectedMultiDeviceFilesystem()
+    {
+        const string json =
+            """
+            {
+              "blockdevices": [
+                {
+                  "name":"/dev/sda","kname":"sda","path":"/dev/sda","type":"disk","size":1000000000,
+                  "model":"Member A","serial":"A","tran":"usb","rm":true,"ro":false,"uuid":"BTRFS-1",
+                  "children":[{"name":"/dev/sda1","kname":"sda1","path":"/dev/sda1","pkname":"sda","type":"part","size":900000000,"fstype":"btrfs","uuid":"BTRFS-1","mountpoints":["/"]}]
+                },
+                {
+                  "name":"/dev/sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":2000000000,
+                  "model":"Member B","serial":"B","tran":"usb","rm":true,"ro":false,"uuid":"BTRFS-1",
+                  "children":[{"name":"/dev/sdb1","kname":"sdb1","path":"/dev/sdb1","pkname":"sdb","type":"part","size":1900000000,"fstype":"btrfs","uuid":"BTRFS-1","mountpoints":[]}]
+                }
+              ]
+            }
+            """;
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            json,
+            "{\"filesystems\":[{\"source\":\"/dev/sda1\",\"target\":\"/\"}]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_ExcludesEveryMemberOfProtectedMdArray()
+    {
+        const string json =
+            """
+            {
+              "blockdevices": [
+                {
+                  "name":"/dev/sda","kname":"sda","path":"/dev/sda","type":"disk","size":1000000000,
+                  "model":"Member A","serial":"A","tran":"usb","rm":true,"ro":false,"mduuid":"MD-1",
+                  "children":[{"name":"/dev/md0","kname":"md0","path":"/dev/md0","pkname":"sda","type":"raid1","size":900000000,"fstype":"ext4","mountpoints":["/"]}]
+                },
+                {
+                  "name":"/dev/sdb","kname":"sdb","path":"/dev/sdb","type":"disk","size":2000000000,
+                  "model":"Member B","serial":"B","tran":"usb","rm":true,"ro":false,"mduuid":"MD-1"
+                }
+              ]
+            }
+            """;
+
+        LinuxInventory inventory = LinuxDiskInventory.Parse(
+            json,
+            "{\"filesystems\":[{\"source\":\"/dev/md0\",\"target\":\"/\"}]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"]);
+
+        Assert.Empty(inventory.EligibleDisks);
+    }
+
+    [Fact]
+    public void Parse_FailsClosedWhenFindmntOutputIsMalformed()
+    {
+        Assert.Throws<InvalidDataException>(() => LinuxDiskInventory.Parse(
+            BuildLsblk("/media/usb"),
+            "{\"mounts\":[]}",
+            "Filename Type Size Used Priority\n",
+            ["/workspace"]));
+    }
+
+    [Fact]
+    public void PasswdHomes_ReturnsEveryQualifiedHome()
+    {
+        const string passwd =
+            """
+            root:x:0:0:root:/root:/bin/bash
+            alice:x:1000:1000:Alice:/home/alice:/bin/bash
+            bob:x:1001:1001:Bob:/srv/bob:/bin/sh
+            nohome:x:1002:1002:No Home::/bin/false
+            relative:x:1003:1003:Relative:relative/path:/bin/false
+            """;
+
+        IReadOnlyList<string> homes = LinuxUserHome.ParsePasswdHomes(passwd);
+
+        Assert.Equal(["/root", "/home/alice", "/srv/bob"], homes);
+    }
+
     private static string BuildLsblk(string mountPoint) =>
         $$"""
         {

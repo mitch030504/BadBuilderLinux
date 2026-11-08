@@ -20,6 +20,8 @@ internal sealed class LinuxBlockNode
     internal bool ReadOnly { get; init; }
     internal string? FileSystem { get; init; }
     internal string? Label { get; init; }
+    internal string? Uuid { get; init; }
+    internal string? MdUuid { get; init; }
     internal IReadOnlyList<string> MountPoints { get; init; } = [];
     internal LinuxBlockNode? Parent { get; set; }
     internal List<LinuxBlockNode> Children { get; } = [];
@@ -31,7 +33,8 @@ internal static class LinuxDiskInventory
         string lsblkJson,
         string findmntJson,
         string swapsText,
-        IEnumerable<string> protectedPaths)
+        IEnumerable<string> protectedPaths,
+        Func<string, string?>? stableIdResolver = null)
     {
         List<LinuxBlockNode> nodes = ParseLsblk(lsblkJson);
         LinkFlatParents(nodes);
@@ -39,10 +42,14 @@ internal static class LinuxDiskInventory
         HashSet<string> protectedPathSet = BuildProtectedPaths(protectedPaths);
 
         HashSet<LinuxBlockNode> protectedDisks = [];
+        HashSet<string> protectedUuids = new(StringComparer.OrdinalIgnoreCase);
         foreach (string source in GetProtectedMountSources(findmntJson, protectedPathSet))
         {
             if (TryFindNode(byDevice, source, out LinuxBlockNode node))
+            {
                 protectedDisks.Add(GetWholeDisk(node));
+                AddUuid(node, protectedUuids);
+            }
         }
 
         // lsblk mount data provides an independent safety signal when findmnt uses a source
@@ -55,32 +62,58 @@ internal static class LinuxDiskInventory
                 if (target is null)
                     continue;
                 if (protectedPathSet.Any(protectedPath => IsAtOrBelow(protectedPath, target)))
+                {
                     protectedDisks.Add(GetWholeDisk(node));
+                    AddUuid(node, protectedUuids);
+                }
             }
         }
 
         foreach (string swapSource in ParseSwapSources(swapsText))
         {
             if (TryFindNode(byDevice, swapSource, out LinuxBlockNode node))
+            {
                 protectedDisks.Add(GetWholeDisk(node));
+                AddUuid(node, protectedUuids);
+            }
         }
 
         foreach (LinuxBlockNode swapNode in nodes.Where(node =>
             string.Equals(node.FileSystem, "swap", StringComparison.OrdinalIgnoreCase)))
         {
             protectedDisks.Add(GetWholeDisk(swapNode));
+            AddUuid(swapNode, protectedUuids);
+        }
+
+        // Multi-device filesystems (btrfs, mdraid) expose the same UUID on every
+        // member. Protect all of them, not just the member that carries the mount.
+        foreach (LinuxBlockNode node in nodes)
+        {
+            if (HasProtectedUuid(node, protectedUuids))
+                protectedDisks.Add(GetWholeDisk(node));
         }
 
         List<DiskInfo> eligible = [];
         foreach (LinuxBlockNode disk in nodes.Where(node => string.Equals(node.Type, "disk", StringComparison.Ordinal)))
         {
+            // HOTPLUG is set on many internal SATA ports, so it is not evidence of
+            // a removable device. Require a USB transport or the removable flag.
             bool external =
                 string.Equals(disk.Transport, "usb", StringComparison.OrdinalIgnoreCase) ||
-                disk.Removable ||
-                disk.HotPlug;
+                disk.Removable;
 
             if (!external || disk.ReadOnly || !DiskFormatter.IsSupportedDiskSize(disk.Size) || protectedDisks.Contains(disk))
                 continue;
+
+            string? stableId = stableIdResolver?.Invoke(disk.Path);
+            if (string.IsNullOrWhiteSpace(disk.Serial) &&
+                string.IsNullOrWhiteSpace(disk.Wwn) &&
+                string.IsNullOrWhiteSpace(stableId))
+            {
+                // Without a hardware or by-id identifier two identical sticks are
+                // indistinguishable, so a post-confirmation swap cannot be detected.
+                continue;
+            }
 
             DiskIdentity identity = DiskIdentity.Create(
                 disk.Path,
@@ -88,7 +121,8 @@ internal static class LinuxDiskInventory
                 disk.Serial,
                 disk.Wwn,
                 disk.Size,
-                disk.Transport);
+                disk.Transport,
+                stableId);
 
             IReadOnlyList<VolumeInfo> volumes = [.. Descendants(disk)
                 .Where(node => !string.Equals(node.Type, "disk", StringComparison.Ordinal))
@@ -99,6 +133,23 @@ internal static class LinuxDiskInventory
 
         return new LinuxInventory(eligible, nodes);
     }
+
+    private static void AddUuid(LinuxBlockNode node, HashSet<string> uuids)
+    {
+        // Walk the parent chain: mdraid reports MD_UUID on the members, while the
+        // mounted device is the array node above them.
+        for (LinuxBlockNode? current = node; current is not null; current = current.Parent)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Uuid))
+                uuids.Add(current.Uuid);
+            if (!string.IsNullOrWhiteSpace(current.MdUuid))
+                uuids.Add(current.MdUuid);
+        }
+    }
+
+    private static bool HasProtectedUuid(LinuxBlockNode node, HashSet<string> uuids) =>
+        (!string.IsNullOrWhiteSpace(node.Uuid) && uuids.Contains(node.Uuid)) ||
+        (!string.IsNullOrWhiteSpace(node.MdUuid) && uuids.Contains(node.MdUuid));
 
     internal static List<LinuxBlockNode> ParseLsblk(string json)
     {
@@ -141,6 +192,8 @@ internal static class LinuxDiskInventory
             ReadOnly = GetBoolean(element, "ro"),
             FileSystem = GetString(element, "fstype"),
             Label = GetString(element, "label"),
+            Uuid = GetString(element, "uuid"),
+            MdUuid = GetString(element, "mduuid"),
             MountPoints = GetStringArray(element, "mountpoints"),
             Parent = parent,
         };
@@ -229,7 +282,7 @@ internal static class LinuxDiskInventory
         {
             using JsonDocument document = JsonDocument.Parse(json);
             if (!document.RootElement.TryGetProperty("filesystems", out JsonElement fileSystems) || fileSystems.ValueKind != JsonValueKind.Array)
-                return sources;
+                throw new InvalidDataException("findmnt JSON does not contain a filesystems array.");
 
             foreach ((string Source, string Target) mount in FlattenFindmnt(fileSystems))
             {
