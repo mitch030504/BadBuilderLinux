@@ -13,11 +13,12 @@ BadBuilderLinux is a Linux-first fork of Pdawg-bytes/BadBuilder. It prepares an 
 
 ## Architecture
 - `Program.cs` dispatches normal UI startup or the privileged Linux `--disk-helper` mode.
-- `Application/BuilderApp*` owns menus, configuration, staging, preflight, destructive confirmation, install, and cleanup.
+- `Application/BuilderApp*` owns menus, configuration, staging, preflight, and cleanup retry.
+- `Application/InstallCoordinator` owns the irreversible sequence: identity revalidation, exact device-path confirmation, format, copy, and finalize. It takes `IDiskBackend`, `IUserInterface`, and `IPendingCleanupStore` so the safety properties are testable.
 - `Services/Disks/*` owns disk inventory, identity, platform formatting, Linux helper/leases, and protected-path logic.
 - `Services/DownloadService`, `GitHubReleaseClient`, `ArchiveService`, and `InstallService` handle verified acquisition, extraction, planning, and copying.
 - `Services/PeerPressureHomebrewService`, `LaunchIniService`, and `XboxPath` handle Peer Pressure extras, `launch.ini`, and FAT/FATX path rules.
-- Linux runs unprivileged; the scoped sudo helper independently validates the caller UID, disk fingerprint, lease, and mount. Windows requires elevation, locks volumes, and revalidates disk identity after formatting.
+- Linux runs unprivileged; the scoped sudo helper independently validates the caller UID, disk fingerprint, lease, and mount, refuses to run from a caller-writable location, and formats through an `O_EXCL` handle. Windows requires elevation, locks volumes by access path, and revalidates disk identity after formatting.
 
 ## Key Documents
 | Document | Path | Purpose |
@@ -34,15 +35,18 @@ BadBuilderLinux is a Linux-first fork of Pdawg-bytes/BadBuilder. It prepares an 
 - Prefer `internal` types and immutable records; tests access internals through `InternalsVisibleTo`.
 - All relative paths go through `PathSafety`; FAT32 names through `FileServices.ValidateFatRelativePath`; Xbox HDD paths through `XboxPath.ValidateFatxPath`.
 - Never build shell command strings: `ProcessRunner` receives argument lists.
-- Destructive operations require complete preflight before confirmation, exact device-path confirmation, identity revalidation, and cleanup handling.
-- Tests use `TemporaryDirectory`; normal tests never touch a physical disk.
+- Trust comes only from the compiled artifact catalog. A server-supplied digest is transport integrity only.
+- Destructive operations require complete preflight before confirmation, exact device-path confirmation, identity revalidation, a mount-point check, a flush, and cleanup handling.
+- Disk eligibility is fail-closed: USB transport or removable flag, plus a serial/WWN/by-id identity.
+- Tests use `TemporaryDirectory`; normal tests never touch a physical disk. Destructive-flow tests go through `InstallCoordinator` with fakes.
 
 ## How to Run
 - Tests: `dotnet test BadBuilder.Tests/BadBuilder.Tests.csproj -c Release`
 - Warning-free build: `dotnet build BadBuilder.Tests/BadBuilder.Tests.csproj -c Release`
+- Locked restore: `dotnet restore BadBuilder.Tests/BadBuilder.Tests.csproj --locked-mode`
 - Linux publish: `dotnet publish BadBuilder/BadBuilder.csproj -c Release -r linux-x64 --self-contained true`
 - Windows publish: `dotnet publish BadBuilder/BadBuilder.csproj -c Release -r win-x64 --self-contained true`
-- Linux requires `sudo`, `lsblk`, `findmnt`, `wipefs`, `blockdev`, `mount`, `umount`, `sync`; run the app as the desktop user, not root.
+- Linux requires `sudo`, `lsblk`, `findmnt`, `mount`, `umount`, `sync` (optional `udevadm`). Install the binary root-owned; the helper refuses to run from a caller-writable directory.
 - Windows runs from an Administrator terminal.
 
 ## How to Deploy
